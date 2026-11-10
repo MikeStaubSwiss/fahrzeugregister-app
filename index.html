@@ -1,4 +1,9 @@
 <!doctype html>
+<!--
+  Fahrzeugregister
+  Copyright (c) 2026 Mike Staub
+  Lizenziert unter der MIT-Lizenz, siehe LICENSE.
+-->
 <html lang="de">
 <head>
 <meta charset="utf-8">
@@ -146,6 +151,8 @@ textarea.dump{width:100%;min-height:160px;font-family:var(--f-mono);font-size:12
 @media (max-width:460px){.pair{grid-template-columns:minmax(0,1fr)}.pair .c+.c{border-left:0}.c .val{font-size:13.5px}}
 details.foto summary{cursor:pointer;font-size:13px;color:var(--muted);padding:2px 0}
 details.foto img{margin-top:8px;border:1px solid var(--line);border-radius:var(--r);width:100%;max-height:520px;object-fit:contain;background:var(--surface)}
+.copy{margin-top:8px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);text-align:center}
+.copy a{color:inherit}
 @media (max-width:560px){h1{font-size:26px}.actions{width:100%}.actions>*{flex:1 1 auto;justify-content:center}}
 </style>
 </head>
@@ -194,6 +201,8 @@ details.foto img{margin-top:8px;border:1px solid var(--line);border-radius:var(-
     </table>
     <div class="empty" id="empty" hidden></div>
   </div>
+
+  <footer class="copy">© 2026 Mike Staub · Fahrzeugregister · <a href="LICENSE">MIT-Lizenz</a></footer>
 </div>
 
 <div class="overlay" id="overlay" lang="de" hidden>
