@@ -2,7 +2,6 @@
 <!--
   Fahrzeugregister
   Copyright (c) 2026 Mike Staub
-  Lizenziert unter der MIT-Lizenz, siehe LICENSE.
 -->
 <html lang="de">
 <head>
@@ -170,7 +169,6 @@ details.foto img{margin-top:8px;border:1px solid var(--line);border-radius:var(-
         <input type="file" id="scanFile" accept="image/*">
       </label>
       <button id="newBtn"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Manuell</button>
-      <button id="setBtn" title="API-Schlüssel für das Einlesen"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>Einstellungen</button>
       <button id="backupBtn"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14"/></svg>Backup</button>
       <label class="btn"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V8m0 0-4 4m4-4 4 4M5 5h14"/></svg>Restore
         <input type="file" id="restoreFile" accept="application/json,.json">
@@ -202,7 +200,7 @@ details.foto img{margin-top:8px;border:1px solid var(--line);border-radius:var(-
     <div class="empty" id="empty" hidden></div>
   </div>
 
-  <footer class="copy">© 2026 Mike Staub · Fahrzeugregister · <a href="LICENSE">MIT-Lizenz</a></footer>
+  <footer class="copy">© 2026 Mike Staub · Fahrzeugregister</footer>
 </div>
 
 <div class="overlay" id="overlay" lang="de" hidden>
@@ -326,11 +324,8 @@ function lsSave(){
   try { localStorage.setItem(LS, JSON.stringify(vehicles)); return true; }
   catch (e) { showMsg("Speichern im Browser fehlgeschlagen" + (e?.name === "QuotaExceededError" ? ": Speicher voll. Backup erstellen und alte Fotos entfernen." : "."), true); return false; }
 }
-/* ---------- Einstellungen (nur eigenständige Version) ---------- */
-const CFG = "fahrzeugregister.cfg";
-function cfgLoad(){ try { return JSON.parse(localStorage.getItem(CFG) || "{}"); } catch { return {}; } }
-function cfgSave(c){ try { localStorage.setItem(CFG, JSON.stringify(c)); } catch {} }
-const DEFAULT_MODEL = "claude-sonnet-5-5";
+/* Früher gespeicherten API-Schlüssel entfernen */
+try { localStorage.removeItem("fahrzeugregister.cfg"); } catch {}
 
 async function saveVehicle(v){
   v.geaendert = new Date().toISOString();
@@ -428,7 +423,7 @@ function openDetail(v, opts = {}){
   $("#overlay").hidden = false;
   document.body.style.overflow = "hidden";
 }
-function closeDetail(){ $("#overlay").hidden = true; document.body.style.overflow = ""; current = null; }
+function closeDetail(){ $("#sheet").style.maxWidth = ""; $("#overlay").hidden = true; document.body.style.overflow = ""; current = null; }
 function drawSheet(note){
   const v = current;
   const group = g => `<fieldset><legend>${GROUPS[g]}</legend>${FIELDS.filter(f => f.g === g).map(f => {
@@ -499,72 +494,563 @@ $("#scanFile").addEventListener("change", async e => {
   const file = e.target.files?.[0]; e.target.value = "";
   if (!file) return;
   const useSample = !!(sample && imgOK);
-  if (!useSample && !cfgLoad().apiKey) { openSettings("Zum Einlesen wird ein Anthropic-API-Schlüssel benötigt."); return; }
   showMsg("");
   let img; try { img = await loadImage(file); } catch (err) { showMsg(err.message, true); return; }
   const thumb = scaled(img, 900, "image/jpeg", 0.68).dataUrl();
   current = { id: newId(), bild: thumb }; isNew = true; editing = false;
   $("#sheet").className = "sheet";
   $("#sheet").innerHTML = `<div class="sheet-head"><h2 id="dTitle">Ausweis wird gelesen</h2><div class="actions"><button id="sAbort">Abbrechen</button></div></div>
-    <div class="sheet-body"><div class="status"><span class="spin" aria-hidden="true"></span><span id="sStat">Claude liest die Felder aus dem Foto …</span></div>
+    <div class="sheet-body"><div class="status"><span class="spin" aria-hidden="true"></span><span id="sStat">${useSample ? "Claude liest die Felder aus dem Foto …" : "Texterkennung startet …"}</span></div>
     <div class="scan"><img src="${thumb}" alt="Gewähltes Foto"></div></div>`;
   $("#overlay").hidden = false; document.body.style.overflow = "hidden";
   const ac = new AbortController();
-  $("#sAbort").onclick = () => { ac.abort(); closeDetail(); };
+  $("#sAbort").onclick = () => { ac.abort(); closeDetail(); if (!useSample && ocrWorker) { ocrWorker.terminate().catch(() => {}); ocrWorker = null; } };
+  const status = t => { const el = document.getElementById("sStat"); if (el) el.textContent = t; };
   try {
-    const blob = await scaled(img, 2000, "image/jpeg", 0.88).blob();
-    const data = useSample ? await sample.json(PROMPT, { images: [blob], signal: ac.signal, modelTier: "default" }) : await readViaApi(blob, ac.signal);
+    const data = useSample
+      ? await sample.json(PROMPT, { images: [await scaled(img, 2000, "image/jpeg", 0.88).blob()], signal: ac.signal, modelTier: "default" })
+      : await readViaOcr(img, status, ac.signal);
+    if (ac.signal.aborted) return;
     const rec = { id: current.id, bild: thumb };
     for (const f of FIELDS) { let val = data?.[f.k]; if (val == null) continue; val = String(val).replace(/\s+$/, "").replace(/^\n+/, ""); if (val.trim()) rec[f.k] = val; }
     const dup = vehicles.find(x => (rec.stammnummer && x.stammnummer === rec.stammnummer) || (rec.fahrgestellNr && x.fahrgestellNr === rec.fahrgestellNr));
-    let note = "Bitte die gelesenen Werte prüfen und dann speichern.";
-    if (dup) { rec.id = dup.id; rec.notizen = dup.notizen; note = `Dieses Fahrzeug (${dup.schild || dup.stammnummer}) ist schon erfasst. Speichern aktualisiert den bestehenden Eintrag.`; }
+    const found = FIELDS.filter(f => rec[f.k]).length;
+    let note = useSample ? "Bitte die gelesenen Werte prüfen und dann speichern."
+      : found ? `Texterkennung: ${found} Felder erkannt. Bitte alle Werte mit dem Ausweis vergleichen, besonders Sternchen, Ziffern und Vermerke, und fehlende Felder ergänzen.`
+      : "Die Texterkennung hat keine Felder gefunden. Bitte ein schärferes, gerades Foto beider Seiten verwenden oder die Werte von Hand eintragen.";
+    if (dup) { for (const f of FIELDS) if (!rec[f.k] && dup[f.k]) rec[f.k] = dup[f.k]; rec.id = dup.id; note = `Dieses Fahrzeug (${dup.schild || dup.stammnummer}) ist schon erfasst. Speichern aktualisiert den bestehenden Eintrag.`; }
     openDetail(rec, { isNew: !dup, edit: true, note });
   } catch (err) {
     if (ac.signal.aborted) return;
-    const map = { bad_key: "Der API-Schlüssel ist ungültig. Bitte in den Einstellungen prüfen.", not_granted: "Der Zugriff auf Claude wurde nicht erlaubt.", rate_limited: "Gerade zu viele Anfragen. Bitte in einer Minute erneut versuchen.", image_rejected: "Das Bild wurde nicht angenommen (Format oder Grösse).", images_unavailable: "Bilder können in dieser Ansicht nicht gesendet werden." };
+    const map = { not_granted: "Der Zugriff auf Claude wurde nicht erlaubt.", rate_limited: "Gerade zu viele Anfragen. Bitte in einer Minute erneut versuchen.", image_rejected: "Das Bild wurde nicht angenommen (Format oder Grösse).", images_unavailable: "Bilder können in dieser Ansicht nicht gesendet werden." };
     closeDetail();
     showMsg((map[err?.code] || "Einlesen fehlgeschlagen: " + (err?.message || err?.code || err)) + " Du kannst das Fahrzeug auch manuell erfassen.", true);
   }
 });
 
-async function readViaApi(blob, signal){
-  const cfg = cfgLoad();
-  const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = rej; r.readAsDataURL(blob); });
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST", signal,
-    headers: { "content-type": "application/json", "x-api-key": cfg.apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-    body: JSON.stringify({ model: cfg.model || DEFAULT_MODEL, max_tokens: 3000,
-      messages: [{ role: "user", content: [ { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } }, { type: "text", text: PROMPT } ] }] })
-  });
-  const j = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw { code: resp.status === 401 ? "bad_key" : resp.status === 429 ? "rate_limited" : "api", message: j?.error?.message || ("HTTP " + resp.status) };
-  const text = (j.content || []).filter(c => c.type === "text").map(c => c.text).join("");
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) throw { message: "Die Antwort enthielt keine lesbaren Daten." };
-  return JSON.parse(m[0]);
+/* ---------- Texterkennung im Browser (Tesseract.js) ---------- */
+const TESS_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+const TESS_LANG = "https://cdn.jsdelivr.net/npm/@tesseract.js-data/deu@1.0.0/4.0.0_best_int";
+let tessLoading = null, ocrWorker = null;
+function loadTesseract(){
+  if (window.Tesseract) return Promise.resolve();
+  return tessLoading || (tessLoading = new Promise((res, rej) => {
+    const el = document.createElement("script"); el.src = TESS_URL; el.async = true;
+    el.onload = () => res(); el.onerror = () => { tessLoading = null; rej(new Error("Die Texterkennung konnte nicht geladen werden. Bitte die Internetverbindung prüfen.")); };
+    document.head.appendChild(el);
+  }));
 }
-function openSettings(note){
-  const cfg = cfgLoad(); current = null;
-  $("#sheet").className = "sheet";
-  $("#sheet").innerHTML = `<div class="sheet-head"><h2 id="dTitle">Einstellungen</h2><div class="actions"><button class="primary" id="cSave">Speichern</button><button id="cClose">Schliessen</button></div></div>
-    <div class="sheet-body">
-      ${note ? `<div class="notice">${esc(note)}</div>` : ""}
-      <fieldset><legend>Ausweis einlesen</legend>
-        <div class="row"><span class="n"></span><label for="cKey">API-Schlüssel</label><input id="cKey" type="password" autocomplete="off" placeholder="sk-ant-…" value="${esc(cfg.apiKey || "")}"></div>
-        <div class="row"><span class="n"></span><label for="cModel">Modell</label><input id="cModel" value="${esc(cfg.model || DEFAULT_MODEL)}"></div>
-      </fieldset>
-      <div class="unit">Den Schlüssel erstellst du in der Anthropic Console (console.anthropic.com). Er wird nur in diesem Browser gespeichert und direkt an api.anthropic.com gesendet. Jedes Einlesen verursacht API-Kosten auf deinem Konto.</div>
-      <div id="cConfirm"></div>
-      <div><button class="danger" id="cDelKey">Schlüssel löschen</button></div>
-    </div>`;
-  $("#overlay").hidden = false; document.body.style.overflow = "hidden";
-  $("#cClose").onclick = closeDetail;
-  $("#cSave").onclick = () => { cfgSave({ apiKey: $("#cKey").value.trim(), model: $("#cModel").value.trim() || DEFAULT_MODEL }); closeDetail(); showMsg("Einstellungen gespeichert."); };
-  $("#cDelKey").onclick = () => { cfgSave({ model: $("#cModel").value.trim() || DEFAULT_MODEL }); $("#cKey").value = ""; showMsg("API-Schlüssel gelöscht."); };
-  $("#cKey").focus();
+const STAR_FIELDS = ["hubraum", "leistung", "leistungsgewicht", "leergewicht", "nutzlast", "gesamtgewicht", "gewichtZug", "anhaengelast", "dachlast", "emissionscode"];
+async function readViaOcr(img, status, signal){
+  const stop = () => { if (signal.aborted) throw Object.assign(new Error("abgebrochen"), { code: "aborted" }); };
+  status("Texterkennung wird geladen …");
+  await loadTesseract(); stop();
+  if (!ocrWorker) ocrWorker = await Tesseract.createWorker("deu", 1, { langPath: TESS_LANG,
+    logger: m => { if (/traineddata/.test(m.status || "") && m.progress < 1) status("Sprachdaten werden geladen … " + Math.round((m.progress || 0) * 100) + " %"); } });
+  stop();
+  status("Bild wird aufbereitet …");
+  await new Promise(r => setTimeout(r, 30));
+  const sc = Math.min(2, 3000 / img.naturalWidth);
+  const W = Math.round(img.naturalWidth * sc), Hh = Math.round(img.naturalHeight * sc);
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = Hh;
+  const ctx = cv.getContext("2d", { willReadFrequently: true }); ctx.imageSmoothingQuality = "high";
+  // Schräglage auf einem kleinen Abbild schätzen und beim Zeichnen ausgleichen
+  const sw = 800, sh = Math.round(img.naturalHeight * 800 / img.naturalWidth);
+  const sc2 = document.createElement("canvas"); sc2.width = sw; sc2.height = sh;
+  const sctx = sc2.getContext("2d", { willReadFrequently: true }); sctx.drawImage(img, 0, 0, sw, sh);
+  const ang = estimateSkew(sctx.getImageData(0, 0, sw, sh).data, sw, sh);
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, Hh);
+  if (Math.abs(ang) >= 0.3) { ctx.translate(W / 2, Hh / 2); ctx.rotate(-ang * Math.PI / 180); ctx.drawImage(img, -W / 2, -Hh / 2, W, Hh); ctx.setTransform(1, 0, 0, 1, 0, 0); }
+  else ctx.drawImage(img, 0, 0, W, Hh);
+  const pre = preprocessAusweis(ctx.getImageData(0, 0, W, Hh).data, W, Hh);
+  ctx.putImageData(new ImageData(pre.data, W, Hh), 0, 0);
+  stop();
+  const words = [];
+  const passes = ["11", "6"];
+  for (let i = 0; i < passes.length; i++) {
+    status(`Text wird erkannt (Durchgang ${i + 1} von 3) …`);
+    await ocrWorker.setParameters({ tessedit_pageseg_mode: passes[i], preserve_interword_spaces: "1", tessedit_char_whitelist: "" });
+    const { data } = await ocrWorker.recognize(cv);
+    stop();
+    for (const x of data.words || []) words.push({ text: x.text, conf: x.confidence, ...x.bbox });
+  }
+  const first = extractAusweis(words, { dashes: pre.dashes, ink: pre.ink });
+  const res = {};
+  for (let i = 0; i < first.rects.length; i++) {
+    const r = first.rects[i];
+    status(`Felder werden einzeln gelesen (Durchgang 3 von 3) … ${i + 1}/${first.rects.length}`);
+    const rect = { left: Math.max(0, Math.round(r.left)), top: Math.max(0, Math.round(r.top)) };
+    rect.width = Math.max(4, Math.min(W - rect.left, Math.round(r.width))); rect.height = Math.max(4, Math.min(Hh - rect.top, Math.round(r.height)));
+    await ocrWorker.setParameters({ tessedit_pageseg_mode: r.f === "vermerke" ? "6" : "7", preserve_interword_spaces: "1",
+      tessedit_char_whitelist: r.f === "emissionscode" ? "*0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" : STAR_FIELDS.includes(r.f) ? "*0123456789." : "" });
+    const { data } = await ocrWorker.recognize(cv, { rectangle: rect });
+    stop();
+    res[r.f] = { text: data.text, words: (data.words || []).map(x => ({ text: x.text, conf: x.confidence, ...x.bbox })), ink: pre.ink(rect.left, rect.top, rect.width, rect.height) };
+  }
+  const out = refineAusweis(first, res);
+  return out;
 }
-$("#setBtn").onclick = () => openSettings();
+/* Bild für die Texterkennung aufbereiten: Farbstreifen entfernen, adaptiv binarisieren,
+   Tabellenlinien löschen. rgba: Uint8ClampedArray, w/h in Pixeln. */
+function preprocessAusweis(rgba, w, h) {
+  const n = w * h, g = new Float32Array(n);
+  for (let i = 0, j = 0; i < n; i++, j += 4) g[i] = Math.max(rgba[j], rgba[j + 1], rgba[j + 2]);
+  // Integralbild für den lokalen Mittelwert
+  const W1 = w + 1, ii = new Float64Array(W1 * (h + 1));
+  for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += g[y * w + x]; ii[(y + 1) * W1 + x + 1] = ii[y * W1 + x + 1] + row; } }
+  const r = Math.max(10, Math.round(w / 105)), k = 0.8;
+  const black = new Uint8Array(n);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - r), y1 = Math.min(h, y + r + 1);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - r), x1 = Math.min(w, x + r + 1);
+      const s = ii[y1 * W1 + x1] - ii[y0 * W1 + x1] - ii[y1 * W1 + x0] + ii[y0 * W1 + x0];
+      if (g[y * w + x] < (s / ((y1 - y0) * (x1 - x0))) * k) black[y * w + x] = 1;
+    }
+  }
+  // lange Läufe = Linien
+  const L = Math.round(w / 70), line = new Uint8Array(n), vline = new Uint8Array(n);
+  const segs = [];
+  for (let y = 0; y < h; y++) {
+    let x = 0;
+    while (x < w) {
+      if (!black[y * w + x]) { x++; continue; }
+      let e = x; while (e < w && black[y * w + e]) e++;
+      if (e - x >= L) { for (let q = x; q < e; q++) line[y * w + q] = 1; segs.push([y, x, e]); }
+      x = e;
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let y = 0;
+    while (y < h) {
+      if (!black[y * w + x]) { y++; continue; }
+      let e = y; while (e < h && black[e * w + x]) e++;
+      if (e - y >= L) for (let q = y; q < e; q++) { line[q * w + x] = 1; vline[q * w + x] = 1; }
+      y = e;
+    }
+  }
+  // horizontale Segmente zu Linien zusammenfassen (für Trennlinien in den Vermerken)
+  const hlines = [];
+  for (const [y, x0, x1] of segs) {
+    const l = hlines.find(l => y - l.y1 <= 2 && Math.min(l.x1, x1) - Math.max(l.x0, x0) > (x1 - x0) * 0.5);
+    if (l) { l.y1 = y; l.x0 = Math.min(l.x0, x0); l.x1 = Math.max(l.x1, x1); } else hlines.push({ y0: y, y1: y, x0, x1 });
+  }
+  const out = new Uint8ClampedArray(n * 4);
+  for (let i = 0, j = 0; i < n; i++, j += 4) {
+    let b = black[i] && !line[i];
+    if (b === 0 || !b) {
+      // Linienpixel leicht verbreitert entfernen
+    }
+    const v = b ? 0 : 255;
+    out[j] = out[j + 1] = out[j + 2] = v; out[j + 3] = 255;
+  }
+  // 1 Pixel Rand um Linien säubern
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x;
+    if (line[i - 1] || line[i + 1] || line[i - w] || line[i + w]) { const j = i * 4; out[j] = out[j + 1] = out[j + 2] = 255; }
+  }
+  const ink = (x, y, ww, hh) => {
+    let c = 0, t = 0;
+    for (let yy = Math.max(0, y | 0); yy < Math.min(h, (y + hh) | 0); yy++) for (let xx = Math.max(0, x | 0); xx < Math.min(w, (x + ww) | 0); xx++) { t++; if (out[(yy * w + xx) * 4] === 0) c++; }
+    return t ? c / t : 0;
+  };
+  // Gestrichelte Trennlinien (-----) im Bereich finden: dünnes, oben und unten freies Band aus vielen kurzen Strichen
+  const dashes = (rx0, ry0, rw, rh, lh) => {
+    const X0 = Math.max(0, rx0 | 0), X1 = Math.min(w, (rx0 + rw) | 0), Y0 = Math.max(0, ry0 | 0), Y1 = Math.min(h, (ry0 + rh) | 0);
+    const rowInk = []; for (let y = Y0; y < Y1; y++) { let c = 0; for (let x = X0; x < X1; x++) if (black[y * w + x] && !vline[y * w + x]) c++; rowInk.push(c); }
+    const found = []; let y = 0; const T = Math.max(3, (X1 - X0) * 0.012);
+    while (y < rowInk.length) {
+      if (rowInk[y] <= T) { y++; continue; }
+      let e = y; while (e < rowInk.length && rowInk[e] > T) e++;
+      const th = e - y, gap = Math.round(lh * 0.35);
+      const freeAbove = rowInk.slice(Math.max(0, y - gap), y).every(v => v <= T);
+      const freeBelow = rowInk.slice(e, Math.min(rowInk.length, e + gap)).every(v => v <= T);
+      if (th <= lh * 0.7 && freeAbove && freeBelow) {
+        const col = []; for (let x = X0; x < X1; x++) { let b = 0; for (let yy = Y0 + y; yy < Y0 + e; yy++) if (black[yy * w + x] && !vline[yy * w + x]) { b = 1; break; } col.push(b); }
+        const segs = []; let x = 0; while (x < col.length) { if (!col[x]) { x++; continue; } let q = x; while (q < col.length && col[q]) q++; segs.push([x, q]); x = q; }
+        const segsOk = segs.filter(([a, b]) => b - a >= 2);
+        const span = segsOk.length ? segsOk[segsOk.length - 1][1] - segsOk[0][0] : 0;
+        const inkLen = segsOk.reduce((p, [a, b]) => p + b - a, 0);
+        if (span >= lh * 6 && inkLen >= span * 0.35) found.push({ x0: X0 + segsOk[0][0], x1: X0 + segsOk[segsOk.length - 1][1], y0: Y0 + y, y1: Y0 + e });
+      }
+      y = e;
+    }
+    return found;
+  };
+  return { data: out, width: w, height: h, hlines, ink, dashes };
+}
+
+
+/* Schräglage schätzen (in Grad) über das Zeilenprofil: kleines Bild, Winkel mit der schärfsten Zeilenstruktur */
+function estimateSkew(rgba, w, h) {
+  const g = new Uint8Array(w * h);
+  let sum = 0; for (let i = 0, j = 0; i < w * h; i++, j += 4) { g[i] = Math.max(rgba[j], rgba[j + 1], rgba[j + 2]); sum += g[i]; }
+  const thr = (sum / (w * h)) * 0.72;
+  const pts = []; for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (g[y * w + x] < thr) pts.push(x, y);
+  let best = 0, bestScore = -1;
+  for (let a = -6; a <= 6.001; a += 0.2) {
+    const t = Math.tan(a * Math.PI / 180), prof = new Float64Array(h * 2);
+    for (let k = 0; k < pts.length; k += 2) { const yy = Math.round(pts[k + 1] - pts[k] * t) + (h >> 1); if (yy >= 0 && yy < prof.length) prof[yy]++; }
+    let sc = 0; for (let i = 1; i < prof.length; i++) { const d = prof[i] - prof[i - 1]; sc += d * d; }
+    if (sc > bestScore) { bestScore = sc; best = a; }
+  }
+  return best;
+}
+
+/* Zuordnung der OCR-Wörter zu den Feldern des Schweizer Fahrzeugausweises.
+   Eingabe: words = [{text, conf, x0, y0, x1, y1}], Ausgabe: {feld: wert}. */
+function extractAusweis(wordsIn, extra = {}) {
+  const norm = s => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z/]/g, "");
+  const lev = (a, b) => {
+    const m = a.length, n = b.length; if (!m) return n; if (!n) return m;
+    let prev = Array.from({ length: n + 1 }, (_, j) => j);
+    for (let i = 1; i <= m; i++) {
+      const cur = [i];
+      for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+    return prev[n];
+  };
+  // Duplikate aus mehreren Durchgängen zusammenführen
+  const words = [];
+  for (const w of wordsIn.filter(w => w.text && w.text.trim())) {
+    const ov = words.find(o => {
+      const ix = Math.max(0, Math.min(o.x1, w.x1) - Math.max(o.x0, w.x0)), iy = Math.max(0, Math.min(o.y1, w.y1) - Math.max(o.y0, w.y0));
+      const a = ix * iy, u = (o.x1 - o.x0) * (o.y1 - o.y0) + (w.x1 - w.x0) * (w.y1 - w.y0) - a;
+      const sm = Math.min((o.x1 - o.x0) * (o.y1 - o.y0), (w.x1 - w.x0) * (w.y1 - w.y0));
+      return u > 0 && (a / u > 0.45 || (sm > 0 && a / sm > 0.7));
+    });
+    if (!ov) words.push({ ...w, text: w.text.trim() });
+    else if (w.conf > ov.conf + 8 || (Math.abs(w.conf - ov.conf) <= 8 && (w.y1 - w.y0) < (ov.y1 - ov.y0) && w.text.length >= ov.text.length)) Object.assign(ov, w, { text: w.text.trim() });
+  }
+  const H = w => w.y1 - w.y0, cy = w => (w.y0 + w.y1) / 2;
+  // Typische Höhe der kleinen Beschriftungen (die Mehrheit der Wörter)
+  const baseH = (() => { const hs = words.filter(w => w.conf > 60 && /[a-zäöü]{3,}/.test(w.text)).map(H).sort((a, b) => a - b); return hs.length ? hs[Math.floor(hs.length * 0.4)] : 20; })();
+
+  const LABELS = {
+    halter: ["vornamen", "name"], geburtsdatum: ["geburtsdatum"], heimatstaat: ["heimatstaat"], versicherung: ["versicherung"],
+    vermerke: ["verfugungen"], schild: ["schild"], verwendung: ["verwendung"], art: ["fahrzeugs"],
+    markeTyp: ["marke"], fahrgestellNr: ["fahrgestellnr", "fahrgestell"], karosserie: ["karosserie"], farbe: ["farbe"],
+    plaetze: ["platze"], stammnummer: ["stammnummer"], typengenehmigung: ["typengenehmigung"], hubraum: ["hubraum"],
+    leistung: ["leistung"], leistungsgewicht: ["kw/kg"], inverkehrsetzung: ["inverkehrsetzung"], leergewicht: ["leergewicht"],
+    nutzlast: ["nutz/sattellast", "sattellast"], gesamtgewicht: ["gesamtgewicht"], gewichtZug: ["zuges"],
+    anhaengelast: ["anhangelast"], dachlast: ["dachlast"], emissionscode: ["emissionscode"], pruefung: ["prufungen"],
+  };
+  const matches = (w, keys) => {
+    const t = norm(w.text); if (t.length < 3 || H(w) > baseH * 1.75) return false;
+    return keys.some(k => t === k || (k.length >= 5 && ((t.includes(k) && t.length <= k.length + 3) || (Math.abs(t.length - k.length) <= 2 && lev(t, k) <= (k.length >= 9 ? 2 : 1)))));
+  };
+  const anchors = {};
+  for (const [f, keys] of Object.entries(LABELS)) anchors[f] = words.filter(w => matches(w, keys));
+  // "Leergewicht" kommt zweimal vor: rechts = Feld 30, links = Feld 78
+  if (anchors.leergewicht.length > 1) {
+    const s = [...anchors.leergewicht].sort((a, b) => a.x0 - b.x0);
+    if (!anchors.leistungsgewicht.length) anchors.leistungsgewicht = [s[0]];
+    anchors.leergewicht = [s[s.length - 1]];
+  } else if (anchors.leergewicht.length === 1 && anchors.leistungsgewicht.length) {
+    // nichts zu tun
+  }
+  const A = f => {
+    const list = anchors[f]; if (!list || !list.length) return null;
+    return [...list].sort((a, b) => b.conf - a.conf)[0];
+  };
+  const labelWords = new Set(Object.values(anchors).flat());
+  const labelH = baseH;
+
+  // Seitengrenze: zwischen Halter-Spalte und Fahrzeug-Spalte
+  const xs = A("schild") || A("markeTyp") || A("farbe");
+  const split = xs ? xs.x0 - labelH * 2.5 : Math.max(...words.map(w => w.x1)) / 2;
+  // Werte-Wörter: Schreibmaschinenschrift, deutlich grösser als die Beschriftungen
+  const STOP = /^(code|kg|total|totale|vorne|avant|anteriori|davant|cm|kw|kw\/kg|cm3)$/i;
+  const isValue = w => !labelWords.has(w) && H(w) >= labelH * 1.3 && H(w) <= labelH * 3.2 && (w.conf >= 55 || (w.conf >= 30 && /[A-Za-z0-9*]{2,}/.test(w.text))) && !STOP.test(w.text.replace(/[^\w/]/g, "")) && !/^[|\\_—–;:,.-]$/.test(w.text);
+  const values = words.filter(isValue);
+  const looseValue = w => !labelWords.has(w) && H(w) >= labelH * 1.1 && H(w) <= labelH * 3.2 && (w.conf >= 55 || (w.conf >= 30 && /[A-Za-z0-9*]{2,}/.test(w.text))) && !STOP.test(w.text.replace(/[^\w/]/g, "")) && !/^[|\\_—–;:,.-]$/.test(w.text);
+  const values2 = words.filter(looseValue);
+  const all3 = Object.keys(LABELS).filter(f => !["halter", "geburtsdatum", "heimatstaat", "versicherung", "vermerke"].includes(f));
+  const anchorsP3 = all3.map(f => A(f)).filter(Boolean);
+  const out = {}, rects = [], conf = {}; let first_dash = [];
+
+  const band = a => [a.y0 - labelH * 0.8, a.y0 + labelH * 4.6];
+  const rightOf = (a, list) => {
+    const [b0, b1] = band(a);
+    const nextX = Math.min(Infinity, ...anchorsP3.filter(o => o !== a && o.x0 > a.x1 + labelH && o.y0 < b1 && o.y0 + labelH * 4 > b0).map(o => o.x0 - labelH * 1.2));
+    return list.filter(w => w.x0 > a.x1 && w.x0 < nextX && cy(w) > b0 && cy(w) < b1).sort((p, q) => p.x0 - q.x0);
+  };
+  const join = ws => ws.map(w => w.text).join(" ").replace(/\s+/g, " ").trim();
+  const STARF = ["hubraum", "leistung", "leistungsgewicht", "leergewicht", "nutzlast", "gesamtgewicht", "gewichtZug", "anhaengelast", "dachlast", "emissionscode"];
+  const fixNum = (f, v) => {
+    if (!v || f === "emissionscode") return v;
+    let t = v.replace(/[A-Z]+$/, "");
+    t = t.replace(/[ODQC]/g, "0").replace(/[IL]/g, "1").replace(/S/g, "5").replace(/B/g, "8").replace(/Z/g, "2").replace(/[A-Z]/g, "");
+    if (t && t.length < 6) t = "*".repeat(6 - t.length) + t;
+    return t;
+  };
+  const star = (wsAll, anchor) => {
+    // zusammenhängende Gruppe wählen (Doppelungen aus zwei Durchgängen vermeiden)
+    const srt = [...wsAll].sort((a, b) => a.x0 - b.x0), grps = [];
+    for (const w of srt) { const g = grps[grps.length - 1]; if (g && w.x0 - g[g.length - 1].x1 < labelH * 0.8 && w.x0 >= g[g.length - 1].x1 - 2) g.push(w); else grps.push([w]); }
+    const clean = g => g.map(w => w.text).join("").replace(/[^*0-9A-Za-z.]/g, "");
+    const ws = grps.sort((a, b) => (/[*xX]/.test(clean(b)) - /[*xX]/.test(clean(a))) || clean(b).length - clean(a).length)[0] || [];
+    let t = ws.map(w => w.text).join("").replace(/[xX×+#%★☆✱✶✳⁎∗'"`´^]/g, "*").replace(/[^*0-9A-Z.]/g, "");
+    t = t.replace(/^[^*0-9A-Z]+/, "");
+    if (!t && anchor) return ws.length ? "******" : "";
+    if (t && t.length < 6) t = "*".repeat(6 - t.length) + t;
+    if (t.length > 6 && /^\*/.test(t)) t = t.slice(-6);
+    return t;
+  };
+
+  // ---------- Seite 3: Raster über die Feldnummern ----------
+  const LEFT = [["15", "schild"], ["17", "verwendung"], ["19", "art"], ["21", "markeTyp"], ["23", "fahrgestellNr"], ["25", "karosserie"], ["26", "farbe"],
+    ["27", "plaetze"], ["18", "stammnummer"], ["24", "typengenehmigung"], ["37", "hubraum"], ["76", "leistung"], ["78", "leistungsgewicht"],
+    ["36", "inverkehrsetzung"], ["38", "ausstellung"], ["39", "pruefung"]];
+  const RIGHT = { "27": ["30", "leergewicht"], "18": ["32", "nutzlast"], "24": ["33", "gesamtgewicht"], "37": ["35", "gewichtZug"],
+    "76": ["31", "anhaengelast"], "78": ["55", "dachlast"], "36": ["72", "emissionscode"] };
+  const small = words.filter(w => H(w) <= labelH * 1.5 && w.conf >= 40);
+  const numTok = w => w.text.replace(/[^0-9]/g, "");
+  const p3 = w => w.x0 > split - labelH;
+  // linke Nummernspalte
+  const leftCands = small.filter(w => p3(w) && /^\d{2}$/.test(numTok(w)) && LEFT.some(([n]) => n === numTok(w)));
+  const medX = arr => { const a = arr.map(w => w.x0).sort((p, q) => p - q); return a.length ? a[Math.floor(a.length / 2)] : null; };
+  let lx = medX(leftCands);
+  const rowY = {};
+  if (lx != null) {
+    for (const [n] of LEFT) {
+      const c = leftCands.filter(w => numTok(w) === n && Math.abs(w.x0 - lx) < labelH * 1.6).sort((a, b) => b.conf - a.conf)[0];
+      if (c) rowY[n] = cy(c);
+    }
+    // Ausreisser entfernen (Reihenfolge muss stimmen)
+    let last = -Infinity;
+    for (const [n] of LEFT) { if (rowY[n] == null) continue; if (rowY[n] <= last) delete rowY[n]; else last = rowY[n]; }
+    // fehlende Zeilen interpolieren
+    const idx = LEFT.map(([n]) => n), known = idx.filter(n => rowY[n] != null);
+    if (known.length >= 2) {
+      const ki = known.map(n => idx.indexOf(n));
+      const pitch = (rowY[known[known.length - 1]] - rowY[known[0]]) / (ki[ki.length - 1] - ki[0]);
+      idx.forEach((n, i) => {
+        if (rowY[n] != null) return;
+        const before = ki.filter(k => k < i).pop(), after = ki.find(k => k > i);
+        if (before != null && after != null) rowY[n] = rowY[idx[before]] + (rowY[idx[after]] - rowY[idx[before]]) * (i - before) / (after - before);
+        else if (before != null) rowY[n] = rowY[idx[before]] + pitch * (i - before);
+        else if (after != null) rowY[n] = rowY[idx[after]] - pitch * (after - i);
+      });
+      rowY._pitch = pitch;
+    }
+  }
+  // rechte Nummernspalte (30, 32, 33 ...)
+  const rightNums = Object.values(RIGHT).map(r => r[0]);
+  const rightCands = small.filter(w => p3(w) && lx != null && w.x0 > lx + labelH * 20 && rightNums.includes(numTok(w)));
+  const rx = medX(rightCands);
+  if (rowY._pitch) {
+    const pitch = rowY._pitch, half = pitch * 0.5;
+    const valStart = lx + labelH * 10.8;
+    const pageR = Math.max(...words.filter(p3).map(w => w.x1));
+    const rowTop = y => y - half * 0.92, rowH = half * 1.84;
+    for (const [n, f] of LEFT) {
+      const y = rowY[n]; if (y == null) continue;
+      const paired = RIGHT[n];
+      const xEnd = paired && rx != null ? rx - labelH * 0.5 : pageR;
+      const vs = n === "38" ? lx + labelH * 1.6 : n === "39" ? lx + labelH * 7.5 : valStart;
+      rects.push({ f, left: vs, top: rowTop(y), width: xEnd - vs, height: rowH });
+      if (paired && rx != null) rects.push({ f: paired[1], left: rx + labelH * 13, top: rowTop(y), width: Math.min(pageR, rx + labelH * 26.5) - rx - labelH * 13, height: rowH });
+    }
+    const inRow = (y, x0, x1) => values2.filter(w => p3(w) && cy(w) > y - half && cy(w) < y + half && w.x0 >= x0 && w.x0 < x1).sort((a, b) => a.x0 - b.x0);
+    for (const [n, f] of LEFT) {
+      const y = rowY[n]; if (y == null) continue;
+      const paired = RIGHT[n];
+      const xEnd = paired && rx != null ? rx - labelH * 0.5 : Infinity;
+      const ws = inRow(y, n === "38" ? lx + labelH * 1.6 : n === "39" ? lx + labelH * 7.5 : valStart, xEnd);
+      const mc = list => list.length ? list.reduce((p, w) => p + w.conf, 0) / list.length : 0;
+      if (paired && rx != null) {
+        const rws = inRow(y, rx + labelH * 13, rx + labelH * 26.5);
+        const v = fixNum(paired[1], star(rws, true)); if (v) { out[paired[1]] = v; conf[paired[1]] = mc(rws); }
+      }
+      conf[f] = mc(ws);
+      if (STARF.includes(f)) { const v = fixNum(f, star(ws, true)); if (v) out[f] = v; continue; }
+      if (!ws.length) continue;
+      if (f === "schild") {
+        const t = join(ws);
+        const m = t.match(/\b([A-Z]{2})\s?(\d{1,6})\b/); if (m) out.schild = m[1] + m[2];
+        else { const raw = ws.map(w => w.text).find(x => /^[A-Z][A-Z-.]?\s?\d{3,6}$/.test(x)); if (raw) out.schild = raw; }
+        const fb = ws.map(w => w.text.replace(/[^A-Za-zäöüÄÖÜ]/g, "")).find(x => /^(weiss|gelb|blau|grün|gruen|braun|rot)$/i.test(x));
+        if (fb) out.schildfarbe = fb.toLowerCase();
+        continue;
+      }
+      if (f === "art" || f === "karosserie") {
+        let list = ws; const last = list[list.length - 1];
+        if (list.length > 1 && /^\d{1,3}$/.test(last.text) && last.x0 - list[list.length - 2].x1 > labelH * 4) {
+          out[f === "art" ? "artCode" : "karosserieCode"] = last.text; list = list.slice(0, -1);
+        }
+        out[f] = join(list); continue;
+      }
+      if (f === "plaetze") {
+        const nums = ws.map(w => w.text.replace(/[^\d]/g, "")).filter(Boolean);
+        if (nums[0]) out.plaetze = nums[0]; if (nums[1]) out.plaetzeVorne = nums[1];
+        continue;
+      }
+      if (f === "stammnummer") { const m = join(ws).replace(/,/g, ".").replace(/\s/g, "").match(/\d{3}\.\d{3}\.\d{3}/); if (m) out[f] = m[0]; continue; }
+      if (f === "inverkehrsetzung") { const m = join(ws).replace(/,/g, ".").match(/\d{2}\.\d{2}\.\d{4}/); if (m) out[f] = m[0]; continue; }
+      if (f === "pruefung") { const m = join(ws).replace(/,/g, ".").match(/(\d{2}\.\d{2}\.\d{4})(?:\s+([A-Z]{2}))?/); if (m) out[f] = m[0]; continue; }
+      if (f === "ausstellung") { out[f] = join(ws); continue; }
+      out[f] = join(ws);
+    }
+  }
+  // ---------- Seite 2 ----------
+  const p2 = values.filter(w => w.x1 < split);
+  const lineGroups = ws => {
+    const s = [...ws].sort((a, b) => cy(a) - cy(b)); const lines = [];
+    for (const w of s) {
+      const l = lines.find(l => Math.abs(l.cy - cy(w)) < H(w) * 0.55);
+      if (l) { l.ws.push(w); l.cy = (l.cy * (l.ws.length - 1) + cy(w)) / l.ws.length; } else lines.push({ cy: cy(w), ws: [w] });
+    }
+    lines.forEach(l => l.ws.sort((a, b) => a.x0 - b.x0));
+    return lines.sort((a, b) => a.cy - b.cy);
+  };
+  const A2 = f => { const l = (anchors[f] || []).filter(w => w.x1 < split); return l.length ? [...l].sort((a, b) => a.x0 - b.x0 || b.conf - a.conf)[0] : null; };
+  // Ersatz-Anker über die Feldnummern 07, 08, 09 links neben den Feldern
+  const numAnchor = (n, maxX) => {
+    const c = words.filter(w => w.x1 < maxX && w.text.replace(/[^0-9]/g, "") === n && w.text.replace(/[0-9]/g, "").length <= 1 && H(w) <= labelH * 1.5).sort((a, b) => b.conf - a.conf)[0];
+    return c ? { x0: c.x1 + labelH * 0.3, x1: c.x1 + labelH * 0.3, y0: cy(c) - labelH * 2, y1: cy(c) - labelH, conf: 50, text: "" } : null;
+  };
+  const aName = A2("halter") || numAnchor("0106", split * 0.35);
+  const aGeb = A2("geburtsdatum") || numAnchor("07", split * 0.35);
+  const aHeim = A2("heimatstaat") || numAnchor("08", split);
+  const aVers = A2("versicherung") || numAnchor("09", split * 0.35);
+  let aVerm = A2("vermerke");
+  if (!aVerm) {
+    // Ersatz: Feldnummer 14 (oder 13) ganz links, oder das Wort "Behörde"
+    const num = words.filter(w => w.x1 < split * 0.2 && /^1[34]$/.test(w.text.replace(/[^0-9]/g, "")) && H(w) <= labelH * 1.5 && (!aVers || w.y0 > aVers.y1)).sort((a, b) => b.y0 - a.y0)[0];
+    const beh = words.find(w => w.x1 < split && norm(w.text) === "behorde");
+    const base = num || beh;
+    if (base) aVerm = { x0: num ? num.x1 + labelH * 0.5 : base.x0 - labelH * 8, x1: base.x1, y0: base.y0, y1: Math.max(base.y1, beh ? beh.y1 : 0), text: "", conf: 50 };
+  }
+  // Ausweisnummer: 8 Ziffern oben rechts auf Seite 2
+  const nr = p2.find(w => /^\d{7,9}$/.test(w.text) && (!aGeb || w.y1 < aGeb.y0));
+  if (nr) out.ausweisNr = nr.text;
+  if (aName) {
+    const top = nr ? nr.y1 : aName.y0 - labelH * 2, bottom = aGeb ? aGeb.y0 - labelH * 0.3 : aName.y0 + labelH * 12;
+    const ls = lineGroups(p2.filter(w => w !== nr && w.x0 > aName.x0 + labelH * 9 && cy(w) > top && cy(w) < bottom)).map(l => join(l.ws));
+    const plzI = ls.findIndex(l => /^\d{4}\s+\S/.test(l));
+    if (plzI >= 0) { out.plzOrt = ls[plzI]; if (plzI >= 1) out.strasse = ls[plzI - 1]; if (plzI >= 2) out.vorname = ls[plzI - 2]; if (plzI >= 3) out.name = ls[plzI - 3]; }
+    else if (ls.length === 4 && /\d/.test(ls[2])) { [out.name, out.vorname, out.strasse, out.plzOrt] = ls; }
+  }
+  const nearRow = (a, list) => { if (!a) return []; const [b0, b1] = band(a); return list.filter(w => cy(w) > b0 && cy(w) < b1 && w.x0 > a.x1).sort((p, q) => p.x0 - q.x0); };
+  if (aGeb) { const d = join(nearRow(aGeb, p2)).match(/\d{2}[.,]\d{2}[.,]\d{4}/); if (d) out.geburtsdatum = d[0].replace(/,/g, "."); }
+  if (aHeim) { const t = nearRow(aHeim, p2).map(w => w.text).find(x => /^[A-Z]{1,3}$/.test(x)); if (t) out.heimatstaat = t; }
+  if (aVers) { const ws = nearRow(aVers, p2).filter(w => w.x0 > aVers.x0 + labelH * 8); if (ws.length) out.versicherung = join(ws); }
+  if (aVerm) {
+    const bottomP2 = Math.max(...words.filter(w => w.x1 < split).map(w => w.y1));
+    first_dash = extra.dashes ? extra.dashes(aVerm.x0 - labelH, aVerm.y1 + labelH * 1.2, split - aVerm.x0, bottomP2 - aVerm.y1 - labelH * 1.2, labelH) : [];
+    rects.push({ f: "vermerke", left: aVerm.x0 - labelH, top: aVerm.y1 + labelH * 1.4, width: split - aVerm.x0, height: bottomP2 - aVerm.y1 - labelH * 1.4 });
+    const ws = values2.filter(w => w.x1 < split && w.y0 > aVerm.y1 + labelH * 0.8);
+    if (ws.length) { const top = Math.min(...ws.map(w => w.y0)), bot = Math.max(...ws.map(w => w.y1)); first_dash = first_dash.filter(d => d.y0 > top + labelH && d.y1 < bot - labelH * 0.5 && (d.x1 - d.x0) < (split - aVerm.x0) * 0.8); }
+    const v = buildVermerke(ws, first_dash, labelH); if (v.trim()) out.vermerke = v;
+  }
+
+  // ---------- Fallbacks über den ganzen Text ----------
+  const text = lineGroups(values).map(l => join(l.ws)).join("\n");
+  if (!out.stammnummer) { const m = text.match(/\b\d{3}[.,]\d{3}[.,]\d{3}\b/); if (m) out.stammnummer = m[0].replace(/,/g, "."); }
+  if (!out.schild) { const m = text.match(/\b(AG|AI|AR|BE|BL|BS|FR|GE|GL|GR|JU|LU|NE|NW|OW|SG|SH|SO|SZ|TG|TI|UR|VD|VS|ZG|ZH)\s?(\d{1,6})\b/); if (m) out.schild = m[1] + m[2]; }
+  const aus = text.match(/([A-ZÄÖÜ][a-zäöü]+),?\s+den\s+(\d{2}[.,]\d{2}[.,]\d{4})/);
+  if (aus) out.ausstellung = `${aus[1]}, den ${aus[2].replace(/,/g, ".")}`;
+  if (out.ausstellung) out.ausstellung = out.ausstellung.charAt(0).toUpperCase() + out.ausstellung.slice(1);
+  if (!out.pruefung) { const m = text.match(/\b(\d{2}\.\d{2}\.\d{4})\s+([A-Z]{2})\b/); if (m) out.pruefung = m[1] + " " + m[2]; }
+  for (const k of Object.keys(out)) if (out[k] == null || out[k] === "") delete out[k];
+  return { out, rects, labelH, star, fixNum, dashes: first_dash, conf };
+}
+
+/* Zweiter Durchgang: Ergebnisse der Einzelzeilen einarbeiten. res = {feld: {text, words}} */
+function refineAusweis(first, res) {
+  const out = { ...first.out };
+  const { star, labelH } = first;
+  const STARF = ["hubraum", "leistung", "leistungsgewicht", "leergewicht", "nutzlast", "gesamtgewicht", "gewichtZug", "anhaengelast", "dachlast", "emissionscode"];
+  for (const [f, r] of Object.entries(res)) {
+    if (f === "vermerke") continue;
+    if (STARF.includes(f) && !(r.words || []).some(w => /[0-9A-Z]/.test(w.text))) {
+      // nur Sternchen (oder nichts erkannt): Wert aus dem ersten Durchgang behalten, sonst an der Tinte entscheiden
+      if (first.out[f] && /[0-9A-Z]/.test(first.out[f])) continue;
+      if (r.ink != null && r.ink > 0.006) out[f] = "******"; else if (r.ink != null) delete out[f];
+      continue;
+    }
+    // Wörter der Zeile: Rauschen am Rand abschneiden
+    let ws = (r.words || []).filter(w => w.text.trim() && (STARF.includes(f) || w.conf >= 25) && !/^[|!:;,.'‘’"„“\]\[(){}£%©_~-]+$/.test(w.text.trim())).sort((a, b) => a.x0 - b.x0);
+    const cwd = (() => { const q = ws.filter(w => w.text.length >= 3).map(w => (w.x1 - w.x0) / w.text.length).sort((a, b) => a - b); return q.length ? q[Math.floor(q.length / 2)] : labelH; })();
+    const groups = []; for (const w of ws) { const g = groups[groups.length - 1]; if (g && w.x0 - g[g.length - 1].x1 < cwd * 3.2) g.push(w); else groups.push([w]); }
+    let main = groups[0] || [], tail = groups.slice(1).flat();
+    if (STARF.includes(f)) {
+      const toks = ws.map(w => ({ w, t: w.text.replace(/[^*0-9A-Z.]/g, "") })).filter(o => o.t);
+      const best = toks.sort((a, b) => (/\*/.test(b.t) - /\*/.test(a.t)) || b.t.length - a.t.length)[0];
+      main = best ? [best.w] : []; tail = [];
+    }
+    const meanConf = main.length ? main.reduce((p, w) => p + w.conf, 0) / main.length : 0;
+    const t = main.map(w => w.text).join(" ").replace(/\s+/g, " ").trim();
+    const tailT = tail.map(w => w.text).join(" ").trim();
+    if (!STARF.includes(f) && first.out[f] && meanConf < 70) continue; // erster Durchgang war sicherer
+    if (!t) continue;
+    if (STARF.includes(f)) {
+      // nur das zusammenhängende Wert-Stück nehmen
+      const m = (t.replace(/\s/g, "").match(/\*{0,6}[0-9A-Z.]{0,6}/g) || []).filter(Boolean).sort((a, b) => b.length - a.length)[0] || "";
+      let v = m; if (v && v.length < 6) v = "*".repeat(6 - v.length) + v;
+      if (v.length > 6) v = v.slice(-6);
+      v = first.fixNum(f, v);
+      if (/^\**[0-9A-Z.]+$/.test(v) && !(first.out[f] && /\d/.test(first.out[f]) && (first.conf[f] || 0) > meanConf + 3)) out[f] = v;
+      continue;
+    }
+    if (f === "stammnummer") { const m = t.replace(/,/g, ".").replace(/\s/g, "").match(/\d{3}\.\d{3}\.\d{3}/); if (m) out[f] = m[0]; continue; }
+    if (f === "inverkehrsetzung") { const m = t.replace(/,/g, ".").match(/\d{2}\.\d{2}\.\d{4}/); if (m) out[f] = m[0]; continue; }
+    if (f === "pruefung") { const m = (t + " " + tailT).replace(/,/g, ".").match(/(\d{1,2})\.(\d{2})\.(\d{4})(\s+[A-Z]{2})?/); if (m) out[f] = m[1].padStart(2, "1") + "." + m[2] + "." + m[3] + (m[4] || ""); continue; }
+    if (f === "ausstellung") { const m = (t + " " + tailT).match(/([A-Za-zÄÖÜäöü][a-zäöü]+),?\s*den\s*(\d{2}[.,]\d{2}[.,]\d{4})/); if (m) out[f] = `${m[1].charAt(0).toUpperCase() + m[1].slice(1)}, den ${m[2].replace(/,/g, ".")}`; else if (!out[f]) out[f] = t; continue; }
+    if (f === "plaetze") { const n = t.match(/\d+/g) || []; if (n[0]) out.plaetze = n[0]; if (n[1]) out.plaetzeVorne = n[1]; continue; }
+    if (f === "schild") { const all = t + " " + tailT; const m = all.match(/\b([A-Z]{2})\s?(\d{1,6})\b/); if (m) out.schild = m[1] + m[2]; else if (!out.schild) { const q = all.match(/\b[A-Z][A-Z-.]?\s?\d{3,6}\b/); if (q) out.schild = q[0]; } const fb = all.match(/\b(weiss|gelb|blau|grün|braun)\b/i); if (fb) out.schildfarbe = fb[1].toLowerCase(); continue; }
+    if (f === "art" || f === "karosserie") {
+      const code = (tailT.match(/\b\d{1,3}\b/) || [])[0];
+      if (t && meanConf >= 70) out[f] = t;
+      if (code) out[f === "art" ? "artCode" : "karosserieCode"] = code;
+      continue;
+    }
+    out[f] = t.replace(/^[|!:;,.\-\s]+|[|!:;,\s]+$/g, "");
+  }
+  // Vermerke aus dem Einzeldurchgang, falls er mehr gefunden hat
+  const vr = res.vermerke;
+  if (vr && vr.words && vr.words.length) {
+    const ws = vr.words.filter(w => w.conf >= 45 && (w.y1 - w.y0) >= labelH * 0.9);
+    const v = buildVermerke(ws, first.dashes, labelH);
+    const score = x => (x || "").replace(/[^A-Za-zÄÖÜäöü0-9]/g, "").length;
+    if (score(v) > score(out.vermerke) * 1.05) out.vermerke = v;
+  }
+  for (const k of Object.keys(out)) if (out[k] == null || out[k] === "") delete out[k];
+  return out;
+}
+
+/* Vermerke-Text aus Wortpositionen: Zeilen, Einrückung, Trennlinien */
+function buildVermerke(wordsIn, dashes, labelH) {
+  const ws = wordsIn.filter(w => w.text && w.text.trim());
+  const cy = w => (w.y0 + w.y1) / 2, Hh = w => w.y1 - w.y0;
+  const r = ws.filter(w => /^[\w.:/äöüÄÖÜ-]{3,}$/.test(w.text)).map(w => (w.x1 - w.x0) / w.text.length).sort((a, b) => a - b);
+  const cw = r.length ? r[Math.floor(r.length / 2)] : labelH * 0.9;
+  const items = [...ws];
+  for (const d of dashes || []) items.push({ text: "-".repeat(Math.max(3, Math.round((d.x1 - d.x0) / cw))), x0: d.x0, x1: d.x1, y0: d.y0 - labelH * 0.6, y1: d.y1 + labelH * 0.6, dash: true });
+  const lines = [];
+  for (const w of items.sort((a, b) => cy(a) - cy(b))) {
+    const l = lines.find(l => Math.abs(l.cy - cy(w)) < Math.max(Hh(w), labelH) * 0.55);
+    if (l && !w.dash && !l.dash) l.ws.push(w); else lines.push({ cy: cy(w), ws: [w], dash: !!w.dash });
+  }
+  lines.forEach(l => l.ws.sort((a, b) => a.x0 - b.x0));
+  lines.sort((a, b) => a.cy - b.cy);
+  if (!lines.length) return "";
+  const minX = Math.min(...lines.map(l => l.ws[0].x0));
+  const out = lines.map(l => {
+    let s = " ".repeat(Math.max(0, Math.round((l.ws[0].x0 - minX) / cw))), px = null;
+    for (const w of l.ws) {
+      if (px != null) s += " ".repeat(Math.max(1, Math.round((w.x0 - px) / cw)));
+      let t = w.text;
+      if (!w.dash && t.length >= 3 && (t.match(/[-—–_~=]/g) || []).length / t.length > 0.5) t = "-".repeat(Math.max(3, Math.round((w.x1 - w.x0) / cw)));
+      s += t; px = w.x1;
+    }
+    return s.replace(/\s+$/, "");
+  }).filter(l => l.trim().length > 1);
+  const ind = Math.min(...out.filter(l => !/^\s*-+$/.test(l)).map(l => l.match(/^ */)[0].length));
+  return out.map(l => l.slice(Math.min(ind, l.match(/^ */)[0].length))).join("\n");
+}
 
 /* ---------- Backup / Restore ---------- */
 $("#backupBtn").onclick = async () => {
@@ -624,7 +1110,6 @@ vehicles = lsLoad(); setSub(); setView(view);
 
 (async () => {
   const c = window.claude; if (!c?.use) return;
-  $("#setBtn").hidden = true;
   c.use("downloads").then(d => downloads = d).catch(() => {});
   c.use("sample").then(async s => {
     sample = s;

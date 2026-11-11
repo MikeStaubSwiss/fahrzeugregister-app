@@ -1,10 +1,10 @@
 # Fahrzeugregister
 
-Eine Verwaltung für Fahrzeuge mit Schweizer Fahrzeugausweis, gebaut als einzelne HTML-Datei. Man fotografiert den Ausweis (Seiten 2 und 3), Claude liest die Felder aus, und das Fahrzeug landet in einer durchsuchbaren Tabelle.
+Eine Verwaltung für Fahrzeuge mit Schweizer Fahrzeugausweis, gebaut als einzelne HTML-Datei. Man fotografiert den Ausweis (Seiten 2 und 3), eine Texterkennung im Browser liest die Felder aus, und das Fahrzeug landet in einer durchsuchbaren Tabelle. Kein Konto, kein Schlüssel, keine Kosten.
 
 ## Funktionen
 
-- **Ausweis einlesen** – Foto wählen, die Felder werden über die Anthropic API erkannt. Die Werte werden zeichengenau übernommen, auch Füllzeichen (`**2500`, `******`) und Trennlinien (`-----`) in den Vermerken.
+- **Ausweis einlesen** – Foto wählen, die Felder werden per Texterkennung ([Tesseract.js](https://github.com/naptha/tesseract.js)) direkt im Browser erkannt. Füllzeichen (`**2500`, `******`) und Trennlinien (`-----`) in den Vermerken werden übernommen.
 - **Tabelle** – Volltextsuche über alle Felder, Sortieren per Klick auf die Spaltenköpfe (Datumsangaben werden chronologisch sortiert).
 - **Ausweise** – Jedes Fahrzeug als Nachbildung der Ausweisseiten 2 und 3 mit Feldnummern, dazu das Originalfoto.
 - **Detail** – Umschalten zwischen Ausweis-Ansicht und bearbeitbaren Feldern, Löschen mit Bestätigung.
@@ -48,16 +48,23 @@ git remote add origin https://github.com/<benutzer>/fahrzeugregister.git
 git push -u origin main
 ```
 
-## Ausweis einlesen: API-Schlüssel
+## Ausweis einlesen: Texterkennung
 
-Für die Bilderkennung braucht es einen eigenen Anthropic-API-Schlüssel ([console.anthropic.com](https://console.anthropic.com)).
+Das Einlesen läuft vollständig im Browser. Das Foto verlässt das Gerät nicht.
 
-1. In der App auf **Einstellungen** klicken.
-2. Schlüssel eintragen, optional das Modell ändern (Standard: `claude-sonnet-5-5`).
+1. Das Bild wird gerade ausgerichtet, Farbstreifen und Tabellenlinien werden entfernt.
+2. Tesseract liest den ganzen Ausweis in zwei Durchgängen. Die Feldnummern (15, 17, 19 …) dienen als Raster für die Zuordnung.
+3. Jede Feldzeile wird ein drittes Mal einzeln gelesen, Gewichte nur mit Ziffern und Sternchen.
 
-Der Schlüssel wird nur im `localStorage` des Browsers gespeichert und direkt an `api.anthropic.com` gesendet (Header `anthropic-dangerous-direct-browser-access`). Er gelangt nie ins Repository. Jedes Einlesen kostet API-Guthaben. Auf einem fremden oder geteilten Gerät den Schlüssel nach Gebrauch über **Schlüssel löschen** entfernen.
+Das dauert je nach Gerät etwa 20 bis 40 Sekunden. Beim ersten Mal lädt die App Tesseract und die deutschen Sprachdaten (rund 5 MB) von `cdn.jsdelivr.net`; danach kommen sie aus dem Browser-Cache.
 
-Ohne Schlüssel funktioniert alles andere weiterhin; Fahrzeuge lassen sich über **Manuell** erfassen.
+Die Erkennung ist gut, aber nicht fehlerfrei: einzelne Ziffern, fehlende Felder oder Randzeichen kommen vor. Die App öffnet das Ergebnis deshalb immer zum Prüfen, bevor gespeichert wird. Für ein gutes Ergebnis den Ausweis flach, gleichmässig beleuchtet und gerade von oben fotografieren.
+
+In der claude.ai-Variante (als Artefakt) liest stattdessen das eingebaute Claude den Ausweis.
+
+## Dokumentation
+
+Die Benutzerdokumentation liegt in [`docs/`](docs/) als Word-Datei und als PDF.
 
 ## Datenspeicherung
 
@@ -86,8 +93,8 @@ Ein Beispiel mit erfundenen Daten liegt in [`beispiele/beispiel-backup.json`](be
 ## Technik
 
 - Eine Datei, reines HTML/CSS/JavaScript, keine Abhängigkeiten ausser Google Fonts.
-- Läuft auch als claude.ai-Artefakt: Dort werden automatisch der Artefakt-Speicher, das integrierte Claude und der Download-Dialog verwendet; die Einstellungen sind dann ausgeblendet.
+- Läuft auch als claude.ai-Artefakt: Dort werden automatisch der Artefakt-Speicher, das integrierte Claude und der Download-Dialog verwendet.
 
-## Copyright und Lizenz
+## Copyright
 
-© 2026 Mike Staub. Veröffentlicht unter der MIT-Lizenz, siehe [LICENSE](LICENSE).
+© 2026 Mike Staub
