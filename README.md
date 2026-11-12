@@ -115,6 +115,6 @@ Ein Beispiel mit erfundenen Daten liegt in [`beispiele/beispiel-backup.json`](be
 - Eine Datei, reines HTML/CSS/JavaScript, keine Abhängigkeiten ausser Google Fonts.
 - Läuft auch als claude.ai-Artefakt: Dort werden automatisch der Artefakt-Speicher, das integrierte Claude und der Download-Dialog verwendet.
 
-## Copyright
+## Version und Copyright
 
-© 2026 Mike Staub
+Version 1.0.0 · © 2026 Mike Staub

@@ -155,6 +155,7 @@ details.foto summary{cursor:pointer;font-size:13px;color:var(--muted);padding:2p
 details.foto img{margin-top:8px;border:1px solid var(--line);border-radius:var(--r);width:100%;max-height:520px;object-fit:contain;background:var(--surface)}
 .copy{margin-top:8px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);text-align:center}
 .copy a{color:inherit}
+.copy .ver{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
 /* Live-Scan */
 .live{position:fixed;inset:0;z-index:30;background:#0b0f0d;display:flex;flex-direction:column}
 .live-video{position:relative;flex:1 1 auto;min-height:0;overflow:hidden;background:#000;padding-top:env(safe-area-inset-top,0px)}
@@ -229,7 +230,7 @@ details.foto img{margin-top:8px;border:1px solid var(--line);border-radius:var(-
     <div class="empty" id="empty" hidden></div>
   </div>
 
-  <footer class="copy">© 2026 Mike Staub · Fahrzeugregister</footer>
+  <footer class="copy">© 2026 Mike Staub · Fahrzeugregister · <span class="ver">Version 1.0.0</span></footer>
 </div>
 
 <div class="live" id="live" lang="de" hidden>
