@@ -19,7 +19,7 @@ img{max-width:100%}
 /* Layout: werkzeug — kopfzeile mit aktionen, darunter sortierbare tabelle; detail als blatt im stil des fahrzeugausweises (feldnummern links, schreibmaschinenwerte rechts) */
 :root{
   --bg:#eceee8; --paper:#dfe0d3; --surface:#f7f8f4; --ink:#1d2320; --muted:#5d665f; --line:#c3c6b7;
-  --accent:#1f5f6b; --accent-ink:#ffffff; --accent-soft:#d3e3e4; --danger:#a3332b; --ok:#2f6b3a;
+  --accent:#1f5f6b; --accent-ink:#ffffff; --accent-soft:#d3e3e4; --danger:#a3332b; --ok:#2f6b3a; --warn:#8a5a00; --warn-soft:#fbe7b5;
   --f-display:"Archivo Narrow","Arial Narrow",system-ui,sans-serif;
   --f-body:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
   --f-mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
@@ -27,10 +27,10 @@ img{max-width:100%}
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#151a18; --paper:#232a26; --surface:#1b211e; --ink:#e3e7df; --muted:#9aa49c; --line:#38423c;
-  --accent:#6fb3bf; --accent-ink:#0f1a1c; --accent-soft:#213a3e; --danger:#e07b70; --ok:#7cc28a; color-scheme:dark}}
+  --accent:#6fb3bf; --accent-ink:#0f1a1c; --accent-soft:#213a3e; --danger:#e07b70; --ok:#7cc28a; --warn:#f0c060; --warn-soft:#4a3a12; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#151a18; --paper:#232a26; --surface:#1b211e; --ink:#e3e7df; --muted:#9aa49c; --line:#38423c;
-  --accent:#6fb3bf; --accent-ink:#0f1a1c; --accent-soft:#213a3e; --danger:#e07b70; --ok:#7cc28a; color-scheme:dark}
+  --accent:#6fb3bf; --accent-ink:#0f1a1c; --accent-soft:#213a3e; --danger:#e07b70; --ok:#7cc28a; --warn:#f0c060; --warn-soft:#4a3a12; color-scheme:dark}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.45;
@@ -98,6 +98,9 @@ legend{font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:
 .row input,.row textarea{font-family:var(--f-mono);font-size:14px;color:var(--ink);border:0;background:transparent;padding:8px 10px 8px 0;width:100%;min-width:0}
 .row textarea{resize:vertical;min-height:70px;line-height:1.4}
 .row input[readonly],.row textarea[readonly]{cursor:text}
+.row.unsure{box-shadow:inset 3px 0 0 var(--warn)}
+.row.unsure input,.row.unsure textarea{background:var(--warn-soft)!important}
+.row.unsure label::after{content:" unsicher";color:var(--warn);font-weight:600;font-size:10.5px;letter-spacing:.03em}
 .editing .row input,.editing .row textarea{background:var(--bg);border-radius:4px;padding-left:8px;margin-block:3px;margin-right:6px}
 .row.wide{grid-template-columns:34px minmax(0,1fr)}
 .row.wide label{grid-column:2;padding-top:8px}
@@ -414,7 +417,7 @@ $("#tbody").addEventListener("click", e => { const tr = e.target.closest("tr[dat
 $("#tbody").addEventListener("keydown", e => { if (e.key === "Enter") { const tr = e.target.closest("tr[data-id]"); if (tr) openDetail(vehicles.find(v => v.id === tr.dataset.id)); } });
 
 /* ---------- Detail ---------- */
-let current = null, editing = false, isNew = false;
+let current = null, editing = false, isNew = false, unsure = [];
 function openDetail(v, opts = {}){
   if (!v) return;
   current = JSON.parse(JSON.stringify(v)); isNew = !!opts.isNew; editing = !!opts.edit;
@@ -423,15 +426,15 @@ function openDetail(v, opts = {}){
   $("#overlay").hidden = false;
   document.body.style.overflow = "hidden";
 }
-function closeDetail(){ $("#sheet").style.maxWidth = ""; $("#overlay").hidden = true; document.body.style.overflow = ""; current = null; }
+function closeDetail(){ unsure = []; $("#sheet").style.maxWidth = ""; $("#overlay").hidden = true; document.body.style.overflow = ""; current = null; }
 function drawSheet(note){
   const v = current;
   const group = g => `<fieldset><legend>${GROUPS[g]}</legend>${FIELDS.filter(f => f.g === g).map(f => {
     const val = esc(v[f.k] || "");
     const ro = editing ? "" : "readonly";
     return f.wide
-      ? `<div class="row wide"><span class="n">${f.nr}</span><label for="f_${f.k}">${esc(f.l)}</label><textarea id="f_${f.k}" data-k="${f.k}" ${ro}>${val}</textarea></div>`
-      : `<div class="row"><span class="n">${f.nr}</span><label for="f_${f.k}">${esc(f.l)}${f.u ? ` <span class="unit">${f.u}</span>` : ""}</label><input id="f_${f.k}" data-k="${f.k}" value="${val}" ${ro}></div>`;
+      ? `<div class="row wide${unsure.includes(f.k) && editing ? " unsure" : ""}"><span class="n">${f.nr}</span><label for="f_${f.k}">${esc(f.l)}</label><textarea id="f_${f.k}" data-k="${f.k}" ${ro}>${val}</textarea></div>`
+      : `<div class="row${unsure.includes(f.k) && editing ? " unsure" : ""}"><span class="n">${f.nr}</span><label for="f_${f.k}">${esc(f.l)}${f.u ? ` <span class="unit">${f.u}</span>` : ""}</label><input id="f_${f.k}" data-k="${f.k}" value="${val}" ${ro}></div>`;
   }).join("")}</fieldset>`;
   $("#sheet").className = "sheet" + (editing ? " editing" : "");
   $("#sheet").innerHTML = `
@@ -461,7 +464,7 @@ function drawSheet(note){
   on("dSave", async () => {
     document.querySelectorAll("#sheet [data-k]").forEach(el => { const t = el.tagName === "TEXTAREA" ? el.value.replace(/\s+$/, "") : el.value.trim(); if (t.trim()) current[el.dataset.k] = t; else delete current[el.dataset.k]; });
     const b = $("#dSave"); b.disabled = true; b.textContent = "Speichert …";
-    try { await saveVehicle(current); editing = false; isNew = false; drawSheet(); showMsg("Fahrzeug gespeichert."); }
+    try { await saveVehicle(current); editing = false; isNew = false; unsure = []; drawSheet(); showMsg("Fahrzeug gespeichert."); }
     catch (e) { b.disabled = false; b.textContent = "Speichern"; showMsg("Speichern fehlgeschlagen: " + (e?.message || e?.code || e), true); }
   });
   on("dDel", () => {
@@ -470,6 +473,7 @@ function drawSheet(note){
     on("dDelYes", async () => { try { await deleteVehicle(v.id); closeDetail(); showMsg("Fahrzeug gelöscht."); } catch (e) { showMsg("Löschen fehlgeschlagen: " + (e?.message || e?.code), true); } });
   });
 }
+$("#sheet").addEventListener("input", e => { const row = e.target.closest(".row.unsure"); if (row) { row.classList.remove("unsure"); unsure = unsure.filter(k => k !== e.target.dataset.k); } });
 $("#overlay").addEventListener("click", e => { if (e.target.id === "overlay" && !editing) closeDetail(); });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#overlay").hidden && !editing) closeDetail(); });
 $("#newBtn").onclick = () => openDetail({id: newId()}, {isNew: true, edit: true});
@@ -515,11 +519,13 @@ $("#scanFile").addEventListener("change", async e => {
     for (const f of FIELDS) { let val = data?.[f.k]; if (val == null) continue; val = String(val).replace(/\s+$/, "").replace(/^\n+/, ""); if (val.trim()) rec[f.k] = val; }
     const dup = vehicles.find(x => (rec.stammnummer && x.stammnummer === rec.stammnummer) || (rec.fahrgestellNr && x.fahrgestellNr === rec.fahrgestellNr));
     const found = FIELDS.filter(f => rec[f.k]).length;
+    const uns = (data && data._unsicher || []).filter(k => FIELDS.some(f => f.k === k));
     let note = useSample ? "Bitte die gelesenen Werte prüfen und dann speichern."
-      : found ? `Texterkennung: ${found} Felder erkannt. Bitte alle Werte mit dem Ausweis vergleichen, besonders Sternchen, Ziffern und Vermerke, und fehlende Felder ergänzen.`
+      : found ? `Texterkennung: ${found} Felder erkannt${uns.length ? `, davon ${uns.length} unsicher (gelb markiert, die beiden Lesungen widersprechen sich)` : ""}. Bitte alle Werte mit dem Ausweis vergleichen und fehlende Felder ergänzen.`
       : "Die Texterkennung hat keine Felder gefunden. Bitte ein schärferes, gerades Foto beider Seiten verwenden oder die Werte von Hand eintragen.";
     if (dup) { for (const f of FIELDS) if (!rec[f.k] && dup[f.k]) rec[f.k] = dup[f.k]; rec.id = dup.id; note = `Dieses Fahrzeug (${dup.schild || dup.stammnummer}) ist schon erfasst. Speichern aktualisiert den bestehenden Eintrag.`; }
     openDetail(rec, { isNew: !dup, edit: true, note });
+    unsure = uns; drawSheet(note);
   } catch (err) {
     if (ac.signal.aborted) return;
     const map = { not_granted: "Der Zugriff auf Claude wurde nicht erlaubt.", rate_limited: "Gerade zu viele Anfragen. Bitte in einer Minute erneut versuchen.", image_rejected: "Das Bild wurde nicht angenommen (Format oder Grösse).", images_unavailable: "Bilder können in dieser Ansicht nicht gesendet werden." };
@@ -541,19 +547,19 @@ function loadTesseract(){
   }));
 }
 const STAR_FIELDS = ["hubraum", "leistung", "leistungsgewicht", "leergewicht", "nutzlast", "gesamtgewicht", "gewichtZug", "anhaengelast", "dachlast", "emissionscode"];
-async function readViaOcr(img, status, signal){
+async function readViaOcr(img, status, signal, opts = {}){
   const stop = () => { if (signal.aborted) throw Object.assign(new Error("abgebrochen"), { code: "aborted" }); };
+  const tick = () => new Promise(r => setTimeout(r, 20));
   status("Texterkennung wird geladen …");
   await loadTesseract(); stop();
   if (!ocrWorker) ocrWorker = await Tesseract.createWorker("deu", 1, { langPath: TESS_LANG,
     logger: m => { if (/traineddata/.test(m.status || "") && m.progress < 1) status("Sprachdaten werden geladen … " + Math.round((m.progress || 0) * 100) + " %"); } });
   stop();
-  status("Bild wird aufbereitet …");
-  await new Promise(r => setTimeout(r, 30));
+  status("Bild wird aufbereitet …"); await tick();
   const sc = Math.min(2, 3000 / img.naturalWidth);
   const W = Math.round(img.naturalWidth * sc), Hh = Math.round(img.naturalHeight * sc);
-  const cv = document.createElement("canvas"); cv.width = W; cv.height = Hh;
-  const ctx = cv.getContext("2d", { willReadFrequently: true }); ctx.imageSmoothingQuality = "high";
+  const cv0 = document.createElement("canvas"); cv0.width = W; cv0.height = Hh;
+  const ctx = cv0.getContext("2d", { willReadFrequently: true }); ctx.imageSmoothingQuality = "high";
   // Schräglage auf einem kleinen Abbild schätzen und beim Zeichnen ausgleichen
   const sw = 800, sh = Math.round(img.naturalHeight * 800 / img.naturalWidth);
   const sc2 = document.createElement("canvas"); sc2.width = sw; sc2.height = sh;
@@ -562,43 +568,117 @@ async function readViaOcr(img, status, signal){
   ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, Hh);
   if (Math.abs(ang) >= 0.3) { ctx.translate(W / 2, Hh / 2); ctx.rotate(-ang * Math.PI / 180); ctx.drawImage(img, -W / 2, -Hh / 2, W, Hh); ctx.setTransform(1, 0, 0, 1, 0, 0); }
   else ctx.drawImage(img, 0, 0, W, Hh);
-  const pre = preprocessAusweis(ctx.getImageData(0, 0, W, Hh).data, W, Hh);
-  ctx.putImageData(new ImageData(pre.data, W, Hh), 0, 0);
-  stop();
-  const words = [];
-  const passes = ["11", "6"];
-  for (let i = 0; i < passes.length; i++) {
-    status(`Text wird erkannt (Durchgang ${i + 1} von 3) …`);
-    await ocrWorker.setParameters({ tessedit_pageseg_mode: passes[i], preserve_interword_spaces: "1", tessedit_char_whitelist: "" });
-    const { data } = await ocrWorker.recognize(cv);
+  const base = ctx.getImageData(0, 0, W, Hh).data;
+  // Zwei Aufbereitungen: A normal, B geschärft mit schonenderer Schwelle (für unscharfe/dunkle Fotos)
+  const mk = pre => { const c = document.createElement("canvas"); c.width = W; c.height = Hh; c.getContext("2d").putImageData(new ImageData(pre.data, W, Hh), 0, 0); return c; };
+  const preA = preprocessAusweis(base, W, Hh, opts.a || { k: 0.8 }); await tick(); stop();
+  const preB = preprocessAusweis(base, W, Hh, opts.b || { k: 0.84, sharpen: 1, despeckle: 2 }); stop();
+  const cvA = mk(preA), cvB = mk(preB);
+  const read = async (cv, psm, rect, wl = "") => {
+    await ocrWorker.setParameters({ tessedit_pageseg_mode: psm, preserve_interword_spaces: "1", tessedit_char_whitelist: wl });
+    const { data } = await ocrWorker.recognize(cv, rect ? { rectangle: rect } : undefined);
     stop();
-    for (const x of data.words || []) words.push({ text: x.text, conf: x.confidence, ...x.bbox });
+    return data;
+  };
+  const toWords = d => (d.words || []).map(x => ({ text: x.text, conf: x.confidence, ...x.bbox }));
+  const passes = opts.passes || [["A", "11"], ["B", "11"]];
+  const wordsBy = { A: [], B: [] };
+  for (let i = 0; i < passes.length; i++) {
+    status(`Text wird erkannt (Durchgang ${i + 1} von ${passes.length + 1}) …`);
+    const [v, psm] = passes[i];
+    wordsBy[v].push(...toWords(await read(v === "A" ? cvA : cvB, psm)));
   }
-  const first = extractAusweis(words, { dashes: pre.dashes, ink: pre.ink });
-  const res = {};
-  for (let i = 0; i < first.rects.length; i++) {
+  const words = [...wordsBy.A, ...wordsBy.B];
+  const first = extractAusweis(words, { dashes: preA.dashes, ink: preA.ink });
+  // Seite 2 (Halter) aus beiden Aufbereitungen getrennt, um Widersprüche zu finden
+  const fA = wordsBy.A.length ? extractAusweis(wordsBy.A, { dashes: preA.dashes, ink: preA.ink }).out : {};
+  const fB = wordsBy.B.length ? extractAusweis(wordsBy.B, { dashes: preB.dashes, ink: preB.ink }).out : {};
+  const resA = {}, resB = {};
+  const n = first.rects.length;
+  for (let i = 0; i < n; i++) {
     const r = first.rects[i];
-    status(`Felder werden einzeln gelesen (Durchgang 3 von 3) … ${i + 1}/${first.rects.length}`);
+    status(`Felder werden einzeln gelesen (Durchgang ${passes.length + 1} von ${passes.length + 1}) … ${i + 1}/${n}`);
     const rect = { left: Math.max(0, Math.round(r.left)), top: Math.max(0, Math.round(r.top)) };
     rect.width = Math.max(4, Math.min(W - rect.left, Math.round(r.width))); rect.height = Math.max(4, Math.min(Hh - rect.top, Math.round(r.height)));
-    await ocrWorker.setParameters({ tessedit_pageseg_mode: r.f === "vermerke" ? "6" : "7", preserve_interword_spaces: "1",
-      tessedit_char_whitelist: r.f === "emissionscode" ? "*0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" : STAR_FIELDS.includes(r.f) ? "*0123456789." : "" });
-    const { data } = await ocrWorker.recognize(cv, { rectangle: rect });
-    stop();
-    res[r.f] = { text: data.text, words: (data.words || []).map(x => ({ text: x.text, conf: x.confidence, ...x.bbox })), ink: pre.ink(rect.left, rect.top, rect.width, rect.height) };
+    const psm = r.f === "vermerke" ? "6" : "7";
+    const wl = r.f === "emissionscode" ? "*0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" : STAR_FIELDS.includes(r.f) ? "*0123456789." : "";
+    // Ausschnitt optional vergrössert mit weissem Rand lesen
+    const up = opts.up || 1;
+    const crop = (cv) => {
+      if (up === 1) return [cv, rect];
+      const pad = 16, c = document.createElement("canvas"); c.width = Math.round(rect.width * up) + pad * 2; c.height = Math.round(rect.height * up) + pad * 2;
+      const x = c.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height); x.imageSmoothingEnabled = true;
+      x.drawImage(cv, rect.left, rect.top, rect.width, rect.height, pad, pad, rect.width * up, rect.height * up);
+      return [c, null];
+    };
+    const back = d => { if (up === 1) return d; const pad = 16; for (const w of d.words || []) { const b = w.bbox; b.x0 = rect.left + (b.x0 - pad) / up; b.x1 = rect.left + (b.x1 - pad) / up; b.y0 = rect.top + (b.y0 - pad) / up; b.y1 = rect.top + (b.y1 - pad) / up; } return d; };
+    const readCrop = async cv => { const [c, rr] = crop(cv); return back(await read(c, psm, rr, wl)); };
+    const dA = await readCrop(cvA);
+    const gl = STAR_FIELDS.includes(r.f) ? preA.glyphs(rect.left, rect.top, rect.width, rect.height) : null;
+    // Ziffernteil rechts der Sternchen separat lesen (Tesseract verschluckt dort gern Zeichen)
+    if (gl && gl.total >= 4 && gl.total <= 7 && gl.stars < gl.total) {
+      const b0 = gl.boxes[gl.stars], b1 = gl.boxes[gl.boxes.length - 1];
+      const pad = Math.round((b1.x1 - b0.x0) / Math.max(1, gl.total - gl.stars) * 0.4);
+      const dr = { left: Math.max(0, b0.x0 - pad), top: rect.top, width: Math.min(W - b0.x0 + pad, b1.x1 - b0.x0 + pad * 2), height: rect.height };
+      const wlD = r.f === "emissionscode" ? "0123456789ABCDEFGHIJKLMNPQRSTUVWXYZ" : "0123456789.";
+      for (const [cvX, psmX] of [[cvA, "7"], [cvA, "8"], [cvB, "7"]]) {
+        const dd = await read(cvX, psmX, dr, wlD);
+        const t = (dd.text || "").replace(/[^0-9A-Z.]/g, "");
+        if (t.length === gl.total - gl.stars) { gl.digits = t; break; }
+      }
+    }
+    resA[r.f] = { text: dA.text, words: toWords(dA), ink: preA.ink(rect.left, rect.top, rect.width, rect.height), glyphs: gl };
+    if (opts.single) continue;
+    const dB = await readCrop(cvB);
+    resB[r.f] = { text: dB.text, words: toWords(dB), ink: preA.ink(rect.left, rect.top, rect.width, rect.height), glyphs: gl };
   }
-  const out = refineAusweis(first, res);
+  const outA = refineAusweis(first, resA);
+  if (opts.single) return outA;
+  const outB = refineAusweis(first, resB);
+  const cmp = vergleicheLesungen(outA, outB, outA._conf, outB._conf);
+  // Halterfelder: Widersprüche zwischen den beiden Aufbereitungen melden
+  const P2 = ["name", "vorname", "strasse", "plzOrt", "geburtsdatum", "heimatstaat", "versicherung", "ausweisNr"];
+  const norm = x => String(x ?? "").replace(/\s+/g, " ").trim();
+  for (const f of P2) {
+    if (fA[f] && fB[f] && norm(fA[f]) !== norm(fB[f])) {
+      const pa = plausibel(f, fA[f]), pb = plausibel(f, fB[f]);
+      if (!cmp.out[f] || plausibel(f, cmp.out[f]) < Math.max(pa, pb)) cmp.out[f] = pa >= pb ? fA[f] : fB[f];
+      if (!cmp.unsicher.includes(f)) cmp.unsicher.push(f);
+    } else if (!cmp.out[f] && (fA[f] || fB[f])) { cmp.out[f] = fA[f] || fB[f]; }
+  }
+  const out = cmp.out;
+  Object.defineProperty(out, "_unsicher", { value: cmp.unsicher, enumerable: false });
   return out;
 }
+
 /* Bild für die Texterkennung aufbereiten: Farbstreifen entfernen, adaptiv binarisieren,
    Tabellenlinien löschen. rgba: Uint8ClampedArray, w/h in Pixeln. */
-function preprocessAusweis(rgba, w, h) {
-  const n = w * h, g = new Float32Array(n);
+function preprocessAusweis(rgba, w, h, opts = {}) {
+  const n = w * h; let g = new Float32Array(n);
   for (let i = 0, j = 0; i < n; i++, j += 4) g[i] = Math.max(rgba[j], rgba[j + 1], rgba[j + 2]);
+  // Kontrast strecken: 1. und 99. Perzentil auf 0..255
+  if (opts.stretch) {
+    const hist = new Uint32Array(256); for (let i = 0; i < n; i += 7) hist[g[i] | 0]++;
+    const tot = hist.reduce((a, b) => a + b, 0); let acc = 0, lo = 0, hi = 255;
+    for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= tot * 0.01) { lo = v; break; } }
+    acc = 0; for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc >= tot * 0.01) { hi = v; break; } }
+    if (hi - lo > 20) { const f = 255 / (hi - lo); for (let i = 0; i < n; i++) g[i] = Math.min(255, Math.max(0, (g[i] - lo) * f)); }
+  }
+  // Schärfen (Unscharf maskieren) für verwackelte oder unscharfe Fotos
+  if (opts.sharpen) {
+    const rr = Math.max(1, Math.round(w / 1000)), W2 = w + 1, I = new Float64Array(W2 * (h + 1));
+    for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += g[y * w + x]; I[(y + 1) * W2 + x + 1] = I[y * W2 + x + 1] + row; } }
+    const g2 = new Float32Array(n);
+    for (let y = 0; y < h; y++) { const y0 = Math.max(0, y - rr), y1 = Math.min(h, y + rr + 1);
+      for (let x = 0; x < w; x++) { const x0 = Math.max(0, x - rr), x1 = Math.min(w, x + rr + 1);
+        const m = (I[y1 * W2 + x1] - I[y0 * W2 + x1] - I[y1 * W2 + x0] + I[y0 * W2 + x0]) / ((y1 - y0) * (x1 - x0));
+        g2[y * w + x] = Math.min(255, Math.max(0, g[y * w + x] + opts.sharpen * (g[y * w + x] - m))); } }
+    g = g2;
+  }
   // Integralbild für den lokalen Mittelwert
   const W1 = w + 1, ii = new Float64Array(W1 * (h + 1));
   for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += g[y * w + x]; ii[(y + 1) * W1 + x + 1] = ii[y * W1 + x + 1] + row; } }
-  const r = Math.max(10, Math.round(w / 105)), k = 0.8;
+  const r = Math.max(10, Math.round(w / 105)), k = opts.k || 0.8;
   const black = new Uint8Array(n);
   for (let y = 0; y < h; y++) {
     const y0 = Math.max(0, y - r), y1 = Math.min(h, y + r + 1);
@@ -606,6 +686,18 @@ function preprocessAusweis(rgba, w, h) {
       const x0 = Math.max(0, x - r), x1 = Math.min(w, x + r + 1);
       const s = ii[y1 * W1 + x1] - ii[y0 * W1 + x1] - ii[y1 * W1 + x0] + ii[y0 * W1 + x0];
       if (g[y * w + x] < (s / ((y1 - y0) * (x1 - x0))) * k) black[y * w + x] = 1;
+    }
+  }
+  // Störpunkte entfernen: schwarze Pixel mit wenig schwarzen Nachbarn
+  if (opts.despeckle) {
+    for (let pass = 0; pass < opts.despeckle; pass++) {
+      const kill = [];
+      for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+        const i = y * w + x; if (!black[i]) continue;
+        const c = black[i - w - 1] + black[i - w] + black[i - w + 1] + black[i - 1] + black[i + 1] + black[i + w - 1] + black[i + w] + black[i + w + 1];
+        if (c <= 2) kill.push(i);
+      }
+      for (const i of kill) black[i] = 0;
     }
   }
   // lange Läufe = Linien
@@ -677,9 +769,43 @@ function preprocessAusweis(rgba, w, h) {
     }
     return found;
   };
-  return { data: out, width: w, height: h, hlines, ink, dashes };
+  const glyphs = (rx0, ry0, rw, rh) => countGlyphs(out, w, h, rx0, ry0, rw, rh);
+  return { data: out, width: w, height: h, hlines, ink, dashes, glyphs };
 }
 
+
+  // Zeichen in einem Feld zählen: Sternchen (etwa quadratisch) und andere Zeichen (deutlich höher als breit)
+function countGlyphs(out, w, h, rx0, ry0, rw, rh) {
+    const X0 = Math.max(0, rx0 | 0), X1 = Math.min(w, (rx0 + rw) | 0), Y0 = Math.max(0, ry0 | 0), Y1 = Math.min(h, (ry0 + rh) | 0);
+    const colInk = []; for (let x = X0; x < X1; x++) { let c = 0; for (let y = Y0; y < Y1; y++) if (out[(y * w + x) * 4] === 0) c++; colInk.push(c); }
+    const segs = []; let x = 0;
+    while (x < colInk.length) { if (!colInk[x]) { x++; continue; } let e = x; while (e < colInk.length && colInk[e]) e++; segs.push([x, e]); x = e; }
+    const box = (a, b) => {
+      let top = Infinity, bot = -1, n = 0;
+      for (let xx = X0 + a; xx < X0 + b; xx++) for (let y = Y0; y < Y1; y++) if (out[(y * w + xx) * 4] === 0) { n++; if (y < top) top = y; if (y > bot) bot = y; }
+      return { x0: X0 + a, x1: X0 + b, w: b - a, h: bot - top + 1, n, top, bot };
+    };
+    let boxes = segs.map(([a, b]) => box(a, b)).filter(b => b.n >= 6);
+    if (!boxes.length) return { stars: 0, total: 0, boxes };
+    const maxH = Math.max(...boxes.map(b => b.h));
+    boxes = boxes.filter(b => b.h >= maxH * 0.35 || b.w >= maxH * 0.35);
+    // Zeichenabstand (gleichbreite Schrift): Median der Abstände der Zeichenmitten
+    const mids = boxes.map(b => (b.x0 + b.x1) / 2), gaps = [];
+    for (let i = 1; i < mids.length; i++) gaps.push(mids[i] - mids[i - 1]);
+    const pitch = gaps.length ? [...gaps].sort((p, q) => p - q)[Math.floor(gaps.length / 2)] : maxH * 0.8;
+    // verschmolzene Zeichen aufteilen
+    const g = [];
+    for (const b of boxes) {
+      const k = Math.max(1, Math.round(b.w / (pitch * 0.92)));
+      if (k === 1 || b.w < pitch * 1.4) { g.push(b); continue; }
+      for (let i = 0; i < k; i++) { const a = Math.round(b.x0 - X0 + (b.w * i) / k), e = Math.round(b.x0 - X0 + (b.w * (i + 1)) / k); g.push(box(a, e)); }
+    }
+    const baseBot = Math.max(...g.map(b => b.bot));
+    const hs = g.map(b => b.h), allLike = Math.max(...hs) <= Math.min(...hs) * 1.25 && g.every(o => o.h / Math.max(1, o.w) < 1.35);
+    const isStar = b => b.w > 2 && b.h / b.w < 1.35 && (b.bot < baseBot - maxH * 0.12 || allLike);
+    let stars = 0; for (const b of g) { if (isStar(b)) stars++; else break; }
+    return { stars, total: g.length, boxes: g };
+  }
 
 /* Schräglage schätzen (in Grad) über das Zeilenprofil: kleines Bild, Winkel mit der schärfsten Zeilenstruktur */
 function estimateSkew(rgba, w, h) {
@@ -755,17 +881,17 @@ function extractAusweis(wordsIn, extra = {}) {
     return [...list].sort((a, b) => b.conf - a.conf)[0];
   };
   const labelWords = new Set(Object.values(anchors).flat());
-  const labelH = baseH;
+  let labelH = baseH;
 
   // Seitengrenze: zwischen Halter-Spalte und Fahrzeug-Spalte
   const xs = A("schild") || A("markeTyp") || A("farbe");
   const split = xs ? xs.x0 - labelH * 2.5 : Math.max(...words.map(w => w.x1)) / 2;
   // Werte-Wörter: Schreibmaschinenschrift, deutlich grösser als die Beschriftungen
-  const STOP = /^(code|kg|total|totale|vorne|avant|anteriori|davant|cm|kw|kw\/kg|cm3)$/i;
+  const STOP = /^(code|kg|total|totale|vorne|avant|anteriori|davant|cm|kw|kw\/kg|cm3|d.?origin[ea]?|origine|pays|paese|stadi|assurance|assicurazione|assicuranza|domicile|domicilio|domicil|nom|cognome|prenoms|nomi|prénoms|num|prenums|plaque|targa|numer|halter|detenteur|détenteur|detentore|possessur)$/i;
   const isValue = w => !labelWords.has(w) && H(w) >= labelH * 1.3 && H(w) <= labelH * 3.2 && (w.conf >= 55 || (w.conf >= 30 && /[A-Za-z0-9*]{2,}/.test(w.text))) && !STOP.test(w.text.replace(/[^\w/]/g, "")) && !/^[|\\_—–;:,.-]$/.test(w.text);
-  const values = words.filter(isValue);
+  let values = words.filter(isValue);
   const looseValue = w => !labelWords.has(w) && H(w) >= labelH * 1.1 && H(w) <= labelH * 3.2 && (w.conf >= 55 || (w.conf >= 30 && /[A-Za-z0-9*]{2,}/.test(w.text))) && !STOP.test(w.text.replace(/[^\w/]/g, "")) && !/^[|\\_—–;:,.-]$/.test(w.text);
-  const values2 = words.filter(looseValue);
+  let values2 = words.filter(looseValue);
   const all3 = Object.keys(LABELS).filter(f => !["halter", "geburtsdatum", "heimatstaat", "versicherung", "vermerke"].includes(f));
   const anchorsP3 = all3.map(f => A(f)).filter(Boolean);
   const out = {}, rects = [], conf = {}; let first_dash = [];
@@ -839,7 +965,40 @@ function extractAusweis(wordsIn, extra = {}) {
   // rechte Nummernspalte (30, 32, 33 ...)
   const rightNums = Object.values(RIGHT).map(r => r[0]);
   const rightCands = small.filter(w => p3(w) && lx != null && w.x0 > lx + labelH * 20 && rightNums.includes(numTok(w)));
-  const rx = medX(rightCands);
+  let rx = medX(rightCands);
+  // Ersatzraster, wenn die Feldnummern nicht lesbar sind (z. B. unscharfes Foto):
+  // Zeilen aus Werten mit eindeutigem Format bestimmen (Schild, Stammnummer, Datum, "den")
+  if (!rowY._pitch) {
+    const midX = (Math.min(...words.map(w => w.x0)) + Math.max(...words.map(w => w.x1))) / 2;
+    const right = words.filter(w => w.x0 > midX - 20 && w.conf >= 30);
+    const pts = [];
+    const sch = right.filter(w => /^[A-Z]{1,2}[-.]?\s?\d{4,6}$/.test(w.text)).sort((a, b) => a.y0 - b.y0)[0];
+    const stm = right.filter(w => /^\d{3}[.,]\d{3}[.,]\d{3}$/.test(w.text)).sort((a, b) => a.y0 - b.y0)[0];
+    const den = right.filter(w => /^den$/i.test(w.text)).sort((a, b) => b.y0 - a.y0)[0];
+    if (sch) pts.push([0, cy(sch), sch]);
+    if (stm) pts.push([8, cy(stm), stm]);
+    if (den) pts.push([14, cy(den), den]);
+    const dates = right.filter(w => /^\d{2}[.,]\d{2}[.,]\d{4}$/.test(w.text));
+    if (stm && den) { const iv = dates.filter(w => cy(w) > cy(stm) && cy(w) < cy(den) - H(den) && (!sch || Math.abs(w.x0 - sch.x0) < H(sch) * 4)).sort((a, b) => b.y0 - a.y0)[0]; if (iv) pts.push([13, cy(iv), iv]); }
+    if (den) { const pr = dates.filter(w => cy(w) > cy(den) + H(den) * 0.8).sort((a, b) => a.y0 - b.y0)[0]; if (pr) pts.push([15, cy(pr), pr]); }
+    if (pts.length >= 2) {
+      const mx = pts.reduce((p, q) => p + q[0], 0) / pts.length, my = pts.reduce((p, q) => p + q[1], 0) / pts.length;
+      const pitch = pts.reduce((p, q) => p + (q[0] - mx) * (q[1] - my), 0) / pts.reduce((p, q) => p + (q[0] - mx) ** 2, 0);
+      if (pitch > 0) {
+        // Beschriftungshöhe aus der Werthöhe ableiten (Werte sind ca. 1,6-mal so hoch)
+        const vh = pts.map(p => H(p[2])).sort((a, b) => a - b)[Math.floor(pts.length / 2)];
+        labelH = vh / 1.6;
+        values = words.filter(isValue); values2 = words.filter(looseValue);
+        LEFT.forEach(([n], i) => { rowY[n] = my + (i - mx) * pitch; });
+        rowY._pitch = pitch;
+        const leftVals = pts.filter(p => p[0] <= 13).map(p => p[2].x0);
+        const valStartF = leftVals.length ? Math.min(...leftVals) : midX + labelH * 12;
+        lx = valStartF - labelH * 11.3;
+        const pageRF = Math.max(...right.map(w => w.x1));
+        rx = valStartF + (pageRF - valStartF) * 0.70 - labelH * 13;
+      }
+    }
+  }
   if (rowY._pitch) {
     const pitch = rowY._pitch, half = pitch * 0.5;
     const valStart = lx + labelH * 10.8;
@@ -896,6 +1055,7 @@ function extractAusweis(wordsIn, extra = {}) {
   }
   // ---------- Seite 2 ----------
   const p2 = values.filter(w => w.x1 < split);
+  const p2l = values2.filter(w => w.x1 < split);
   const lineGroups = ws => {
     const s = [...ws].sort((a, b) => cy(a) - cy(b)); const lines = [];
     for (const w of s) {
@@ -928,15 +1088,15 @@ function extractAusweis(wordsIn, extra = {}) {
   if (nr) out.ausweisNr = nr.text;
   if (aName) {
     const top = nr ? nr.y1 : aName.y0 - labelH * 2, bottom = aGeb ? aGeb.y0 - labelH * 0.3 : aName.y0 + labelH * 12;
-    const ls = lineGroups(p2.filter(w => w !== nr && w.x0 > aName.x0 + labelH * 9 && cy(w) > top && cy(w) < bottom)).map(l => join(l.ws));
+    const ls = lineGroups(p2l.filter(w => w !== nr && w.x0 > aName.x0 + labelH * 9 && cy(w) > top && cy(w) < bottom)).map(l => join(l.ws));
     const plzI = ls.findIndex(l => /^\d{4}\s+\S/.test(l));
     if (plzI >= 0) { out.plzOrt = ls[plzI]; if (plzI >= 1) out.strasse = ls[plzI - 1]; if (plzI >= 2) out.vorname = ls[plzI - 2]; if (plzI >= 3) out.name = ls[plzI - 3]; }
     else if (ls.length === 4 && /\d/.test(ls[2])) { [out.name, out.vorname, out.strasse, out.plzOrt] = ls; }
   }
   const nearRow = (a, list) => { if (!a) return []; const [b0, b1] = band(a); return list.filter(w => cy(w) > b0 && cy(w) < b1 && w.x0 > a.x1).sort((p, q) => p.x0 - q.x0); };
   if (aGeb) { const d = join(nearRow(aGeb, p2)).match(/\d{2}[.,]\d{2}[.,]\d{4}/); if (d) out.geburtsdatum = d[0].replace(/,/g, "."); }
-  if (aHeim) { const t = nearRow(aHeim, p2).map(w => w.text).find(x => /^[A-Z]{1,3}$/.test(x)); if (t) out.heimatstaat = t; }
-  if (aVers) { const ws = nearRow(aVers, p2).filter(w => w.x0 > aVers.x0 + labelH * 8); if (ws.length) out.versicherung = join(ws); }
+  if (aHeim) { const t = nearRow(aHeim, p2l).map(w => w.text).find(x => /^[A-Z]{1,3}$/.test(x)); if (t) out.heimatstaat = t; }
+  if (aVers) { const ws = nearRow(aVers, p2l).filter(w => w.x0 > aVers.x0 + labelH * 8); if (ws.length) out.versicherung = join(ws); }
   if (aVerm) {
     const bottomP2 = Math.max(...words.filter(w => w.x1 < split).map(w => w.y1));
     first_dash = extra.dashes ? extra.dashes(aVerm.x0 - labelH, aVerm.y1 + labelH * 1.2, split - aVerm.x0, bottomP2 - aVerm.y1 - labelH * 1.2, labelH) : [];
@@ -965,6 +1125,21 @@ function refineAusweis(first, res) {
   const STARF = ["hubraum", "leistung", "leistungsgewicht", "leergewicht", "nutzlast", "gesamtgewicht", "gewichtZug", "anhaengelast", "dachlast", "emissionscode"];
   for (const [f, r] of Object.entries(res)) {
     if (f === "vermerke") continue;
+    // Sternchen aus der Bildanalyse: Anzahl Sterne und Zeichen ist zuverlässiger als Tesseract
+    if (STARF.includes(f) && r.glyphs && r.glyphs.total >= 4 && r.glyphs.total <= 7) {
+      const { stars, total } = r.glyphs;
+      const need = Math.max(0, Math.min(6, total) - stars);
+      if (need === 0) { out[f] = "******"; continue; }
+      let dig = (r.words || []).map(w => w.text).join("").replace(/[^0-9A-Z.]/g, "");
+      if (f !== "emissionscode") dig = dig.replace(/[ODQC]/g, "0").replace(/[IL]/g, "1").replace(/S/g, "5").replace(/B/g, "8").replace(/Z/g, "2").replace(/[A-Z]/g, "");
+      else dig = dig.replace(/O/g, "0");
+      if (r.glyphs.digits && r.glyphs.digits.length === need) { out[f] = "*".repeat(6 - need) + r.glyphs.digits; continue; }
+      if (dig.length >= need) { out[f] = "*".repeat(6 - need) + dig.slice(-need); continue; }
+      if (!dig.length && first.out[f]) {
+        const fd = first.out[f].replace(/^\*+/, "");
+        if (fd.length === need) { out[f] = "*".repeat(6 - need) + fd; continue; }
+      }
+    }
     if (STARF.includes(f) && !(r.words || []).some(w => /[0-9A-Z]/.test(w.text))) {
       // nur Sternchen (oder nichts erkannt): Wert aus dem ersten Durchgang behalten, sonst an der Tinte entscheiden
       if (first.out[f] && /[0-9A-Z]/.test(first.out[f])) continue;
@@ -1017,7 +1192,14 @@ function refineAusweis(first, res) {
     const score = x => (x || "").replace(/[^A-Za-zÄÖÜäöü0-9]/g, "").length;
     if (score(v) > score(out.vermerke) * 1.05) out.vermerke = v;
   }
+  if (out.schild) { const m = out.schild.match(/^Z[-.|:;!]\s?(\d{3,6})$/); if (m) out.schild = "ZH" + m[1]; }
+  if (out.emissionscode) out.emissionscode = out.emissionscode.replace(/O/g, "0");
   for (const k of Object.keys(out)) if (out[k] == null || out[k] === "") delete out[k];
+  const confs = {};
+  for (const [f, r] of Object.entries(res)) { const ws = (r.words || []).filter(w => w.text && w.text.trim()); confs[f] = ws.length ? ws.reduce((p, w) => p + w.conf, 0) / ws.length : 0; }
+  if (confs.art != null) confs.artCode = confs.art; if (confs.karosserie != null) confs.karosserieCode = confs.karosserie;
+  if (confs.schild != null) confs.schildfarbe = confs.schild; if (confs.plaetze != null) confs.plaetzeVorne = confs.plaetze;
+  Object.defineProperty(out, "_conf", { value: confs, enumerable: false });
   return out;
 }
 
@@ -1050,6 +1232,57 @@ function buildVermerke(wordsIn, dashes, labelH) {
   }).filter(l => l.trim().length > 1);
   const ind = Math.min(...out.filter(l => !/^\s*-+$/.test(l)).map(l => l.match(/^ */)[0].length));
   return out.map(l => l.slice(Math.min(ind, l.match(/^ */)[0].length))).join("\n");
+}
+
+/* Plausibilität eines Feldwerts (0 = unbrauchbar, 2 = Format stimmt) */
+const KANTONE = "AG AI AR BE BL BS FR GE GL GR JU LU NE NW OW SG SH SO SZ TG TI UR VD VS ZG ZH".split(" ");
+function plausibel(f, v) {
+  if (v == null || v === "") return 0;
+  v = String(v);
+  const STARF = ["hubraum", "leistung", "leistungsgewicht", "leergewicht", "nutzlast", "gesamtgewicht", "gewichtZug", "anhaengelast", "dachlast"];
+  const date = x => { const m = x.match(/^(\d{2})\.(\d{2})\.(\d{4})$/); return m && +m[1] >= 1 && +m[1] <= 31 && +m[2] >= 1 && +m[2] <= 12 && +m[3] > 1880 && +m[3] < 2100; };
+  if (STARF.includes(f)) return /^\*{0,6}[0-9.]{0,6}$/.test(v) && v.length === 6 ? (/^\*+$/.test(v) || !/^\*{0,5}0/.test(v) ? 2 : 1) : 0;
+  if (f === "emissionscode") return /^\*{0,6}[0-9A-Z]{0,6}$/.test(v) && v.length === 6 ? 2 : 0;
+  if (f === "geburtsdatum" || f === "inverkehrsetzung") return date(v) ? 2 : 0;
+  if (f === "pruefung") { const m = v.match(/^(\S+)(?: ([A-Z]{2}))?$/); return m && date(m[1]) ? (m[2] && KANTONE.includes(m[2]) ? 2 : 1) : 0; }
+  if (f === "stammnummer") return /^\d{3}\.\d{3}\.\d{3}$/.test(v) ? 2 : 0;
+  if (f === "schild") { const m = v.match(/^([A-Z]{2})(\d{1,6})$/); return m ? (KANTONE.includes(m[1]) ? 2 : 1) : 0; }
+  if (f === "ausweisNr") return /^\d{8}$/.test(v) ? 2 : /^\d{6,10}$/.test(v) ? 1 : 0;
+  if (["plaetze", "plaetzeVorne", "artCode", "karosserieCode"].includes(f)) return /^\d{1,3}$/.test(v) ? 2 : 0;
+  if (f === "heimatstaat") return /^[A-Z]{1,3}$/.test(v) ? 2 : 0;
+  if (f === "ausstellung") return /^[A-ZÄÖÜ][a-zäöü]+, den \d{2}\.\d{2}\.\d{4}$/.test(v) ? 2 : 1;
+  if (f === "plzOrt") return /^\d{4} [A-ZÄÖÜ]/.test(v) ? 2 : 1;
+  if (f === "vermerke") return 1;
+  // Freitext: seltsame Zeichen und Kurz-Schnipsel kosten Punkte
+  const weird = (v.match(/[^A-Za-zÄÖÜäöüéèàç0-9 .,\/\-()&']/g) || []).length;
+  const junk = v.split(" ").filter(t => t.length <= 2 && /[a-z]/.test(t) && /[A-Z]/.test(t)).length;
+  return Math.max(0, 2 - weird * 0.6 - junk * 0.6);
+}
+
+/* Zwei Lesungen zusammenführen. a/b: Feldwerte, ca/cb: Konfidenzen je Feld. Liefert {out, unsicher} */
+function vergleicheLesungen(a, b, ca = {}, cb = {}) {
+  const out = {}, unsicher = [];
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  const norm = x => String(x ?? "").replace(/\s+/g, " ").trim();
+  for (const f of keys) {
+    const va = a[f], vb = b[f];
+    if (f === "vermerke") {
+      const sc = x => (x || "").replace(/[^A-Za-zÄÖÜäöü0-9]/g, "").length;
+      out[f] = sc(vb) > sc(va) * 1.1 ? vb : (va || vb);
+      continue;
+    }
+    if (!va && !vb) continue;
+    if (norm(va) === norm(vb)) { out[f] = va; continue; }
+    const pa = plausibel(f, va), pb = plausibel(f, vb);
+    let pick;
+    if (pa !== pb) pick = pa > pb ? va : vb;
+    else if (!va || !vb) pick = va || vb;
+    else pick = (ca[f] ?? 0) >= (cb[f] ?? 0) ? va : vb;
+    if (pick) out[f] = pick;
+    if (va && vb) unsicher.push(f);
+    else if (plausibel(f, pick) < 2) unsicher.push(f);
+  }
+  return { out, unsicher };
 }
 
 /* ---------- Backup / Restore ---------- */

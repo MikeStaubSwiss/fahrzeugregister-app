@@ -52,13 +52,23 @@ git push -u origin main
 
 Das Einlesen läuft vollständig im Browser. Das Foto verlässt das Gerät nicht.
 
-1. Das Bild wird gerade ausgerichtet, Farbstreifen und Tabellenlinien werden entfernt.
-2. Tesseract liest den ganzen Ausweis in zwei Durchgängen. Die Feldnummern (15, 17, 19 …) dienen als Raster für die Zuordnung.
-3. Jede Feldzeile wird ein drittes Mal einzeln gelesen, Gewichte nur mit Ziffern und Sternchen.
+1. Das Bild wird gerade ausgerichtet, Farbstreifen und Tabellenlinien werden entfernt. Es entstehen zwei Fassungen: normal und geschärft mit mehr Kontrast (für unscharfe oder dunkle Fotos).
+2. Tesseract liest beide Fassungen ganz. Die Feldnummern (15, 17, 19 …) dienen als Raster für die Zuordnung; sind sie unlesbar, bilden Schild, Stammnummer und Datumsangaben ein Ersatzraster.
+3. Jede Feldzeile wird in beiden Fassungen einzeln gelesen. Bei Gewichten zählt die App die Sternchen direkt im Bild und lässt Tesseract nur die Ziffern lesen.
+4. Pro Feld gewinnt der plausiblere Wert. Widersprechen sich die beiden Lesungen, wird das Feld gelb als **unsicher** markiert.
 
-Das dauert je nach Gerät etwa 20 bis 40 Sekunden. Beim ersten Mal lädt die App Tesseract und die deutschen Sprachdaten (rund 5 MB) von `cdn.jsdelivr.net`; danach kommen sie aus dem Browser-Cache.
+Das dauert je nach Gerät etwa 30 bis 40 Sekunden. Beim ersten Mal lädt die App Tesseract und die deutschen Sprachdaten (rund 5 MB) von `cdn.jsdelivr.net`; danach kommen sie aus dem Browser-Cache.
 
-Die Erkennung ist gut, aber nicht fehlerfrei: einzelne Ziffern, fehlende Felder oder Randzeichen kommen vor. Die App öffnet das Ergebnis deshalb immer zum Prüfen, bevor gespeichert wird. Für ein gutes Ergebnis den Ausweis flach, gleichmässig beleuchtet und gerade von oben fotografieren.
+Testergebnis mit einem echten Ausweis und abgewandelten Fotos (36 Felder pro Bild):
+
+| Foto | richtig |
+|---|---|
+| Original | 35 von 36 |
+| schief und verkleinert | 35 von 36 |
+| dunkel, wenig Kontrast | 29 von 36 |
+| unscharf | 14 von 36 |
+
+Das Ergebnis öffnet sich immer zuerst zum Prüfen. Für ein gutes Ergebnis den Ausweis flach, gleichmässig beleuchtet und gerade von oben fotografieren.
 
 In der claude.ai-Variante (als Artefakt) liest stattdessen das eingebaute Claude den Ausweis.
 
