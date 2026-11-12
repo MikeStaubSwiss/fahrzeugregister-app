@@ -78,6 +78,9 @@ Mit **Live-Scan** liest die App den Ausweis laufend über die Kamera, etwa alle 
 - Verwackelte Bilder werden übersprungen.
 - Felder mit festem Format (Schild, Stammnummer, Datum) zählen nur bei exakt passendem Format; Sachregeln verwerfen Unsinn wie einstellige Gewichte.
 - Test mit einem echten Ausweis und einer simulierten Kamerafahrt: nach rund 95 Sekunden alle 35 Felder bestätigt und richtig.
+- Eine Diagnosezeile zeigt Kameraauflösung, Zeit pro Bild und Schriftgrösse; bei Bedarf Zoom-Knöpfe (wenn das Gerät Zoom anbietet).
+- Werte, die am Bildrand abgeschnitten sind, werden verworfen.
+- iPhone: quer halten, Abstand etwa 20–30 cm (näher stellt Safari nicht scharf). Canvas-Flächen werden wiederverwendet, weil Safari deren Speicher stark begrenzt.
 - Braucht https (GitHub Pages) und Kamerazugriff. Im claude.ai-Artefakt nicht verfügbar.
 
 In der claude.ai-Variante (als Artefakt) liest stattdessen das eingebaute Claude den Ausweis.
@@ -117,4 +120,4 @@ Ein Beispiel mit erfundenen Daten liegt in [`beispiele/beispiel-backup.json`](be
 
 ## Version und Copyright
 
-Version 1.0.0 · © 2026 Mike Staub
+1.0.1 · © 2026 Mike Staub

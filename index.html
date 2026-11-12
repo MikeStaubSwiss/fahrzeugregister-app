@@ -155,7 +155,6 @@ details.foto summary{cursor:pointer;font-size:13px;color:var(--muted);padding:2p
 details.foto img{margin-top:8px;border:1px solid var(--line);border-radius:var(--r);width:100%;max-height:520px;object-fit:contain;background:var(--surface)}
 .copy{margin-top:8px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);text-align:center}
 .copy a{color:inherit}
-.copy .ver{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
 /* Live-Scan */
 .live{position:fixed;inset:0;z-index:30;background:#0b0f0d;display:flex;flex-direction:column}
 .live-video{position:relative;flex:1 1 auto;min-height:0;overflow:hidden;background:#000;padding-top:env(safe-area-inset-top,0px)}
@@ -167,6 +166,11 @@ details.foto img{margin-top:8px;border:1px solid var(--line);border-radius:var(-
 .live-top strong{font-size:15px;font-variant-numeric:tabular-nums}
 .lvbar{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
 .lvbar i{display:block;height:100%;width:0;background:var(--ok);transition:width .3s}
+.lvdiag{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.lvdiag b{color:var(--warn);font-weight:600}
+.lvzoom{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+.lvzoom button{padding:4px 10px;font-size:12.5px}
+.lvzoom button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .lvchips,.lvlegend{display:flex;flex-wrap:wrap;gap:5px}
 .lvlegend{font-size:11.5px;color:var(--muted);gap:12px}
 .lvlegend span{display:inline-flex;align-items:center;gap:5px}
@@ -230,7 +234,7 @@ details.foto img{margin-top:8px;border:1px solid var(--line);border-radius:var(-
     <div class="empty" id="empty" hidden></div>
   </div>
 
-  <footer class="copy">© 2026 Mike Staub · Fahrzeugregister · <span class="ver">Version 1.0.0</span></footer>
+  <footer class="copy">© 2026 Mike Staub · Fahrzeugregister · 1.0.1</footer>
 </div>
 
 <div class="live" id="live" lang="de" hidden>
@@ -244,6 +248,8 @@ details.foto img{margin-top:8px;border:1px solid var(--line);border-radius:var(-
       <div class="actions"><button class="primary" id="lvDone">Übernehmen</button><button id="lvCancel">Abbrechen</button></div>
     </div>
     <div class="lvbar"><i id="lvBar"></i></div>
+    <div class="lvzoom" id="lvZoom" hidden></div>
+    <div class="lvdiag" id="lvDiag"></div>
     <div class="lvlegend"><span><i class="lvdot ok"></i>bestätigt</span><span><i class="lvdot maybe"></i>gelesen, noch nicht bestätigt</span><span><i class="lvdot"></i>fehlt</span></div>
     <div class="lvchips" id="lvChips"></div>
   </div>
@@ -658,7 +664,9 @@ function liveRender(msg) {
   if (msg != null) $("#lvHint").textContent = msg;
 }
 function liveHint() {
-  if (live.frames < 3 && window.innerHeight > window.innerWidth * 1.15) return "Tipp: Handy quer halten, damit der ganze Ausweis gross ins Bild passt";
+  const vv = $("#lvVideo");
+  if (live.frames < 4 && (vv.videoHeight > vv.videoWidth * 1.1 || window.innerHeight > window.innerWidth * 1.15)) return "Tipp: Handy quer halten, damit der ganze Ausweis gross ins Bild passt";
+  if (live.frames < 4 && IS_IOS) return "Ganzen Ausweis ins Bild nehmen, Abstand etwa 20 bis 30 cm";
   const miss = LIVE_FIELDS.filter(f => liveState(f.k) === "miss").map(f => LIVE_SHORT[f.k] || f.l);
   const maybe = LIVE_FIELDS.filter(f => liveState(f.k) === "maybe").length;
   if (!miss.length && !maybe) return "Alle Felder bestätigt";
@@ -671,13 +679,14 @@ async function startLive() {
   $("#live").hidden = false; document.body.style.overflow = "hidden";
   liveRender("Kamera wird gestartet …");
   try {
-    live.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+    live.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 3840 }, height: { ideal: 2160 } }, audio: false });
   } catch (e) {
     stopLive();
     showMsg(e && e.name === "NotAllowedError" ? "Der Zugriff auf die Kamera wurde nicht erlaubt. Bitte im Browser erlauben oder ein Foto mit «Ausweis einlesen» wählen." : "Die Kamera konnte nicht gestartet werden. Bitte ein Foto mit «Ausweis einlesen» wählen.", true);
     return;
   }
   const v = $("#lvVideo"); v.srcObject = live.stream; try { await v.play(); } catch {}
+  liveSetupZoom();
   liveRender("Texterkennung wird geladen …");
   try {
     await loadTesseract();
@@ -694,24 +703,55 @@ async function liveLoop() {
     if (!v.videoWidth) { await sleep(200); continue; }
     const sh = liveSharpness(v);
     live.sharpMax = Math.max(live.sharpMax * 0.97, sh);
-    if (live.frames > 0 && sh < live.sharpMax * 0.4) { liveRender("Bild unscharf, Kamera ruhig halten"); await sleep(250); continue; }
-    const fc = document.createElement("canvas"); fc.width = v.videoWidth; fc.height = v.videoHeight;
+    if (live.frames > 0 && sh < live.sharpMax * 0.4) { live.blurry = (live.blurry || 0) + 1; liveRender("Bild unscharf, Kamera ruhig halten"); liveDiag(); await sleep(250); continue; }
+    const fc = live.fc || (live.fc = document.createElement("canvas"));
+    if (fc.width !== v.videoWidth) fc.width = v.videoWidth; if (fc.height !== v.videoHeight) fc.height = v.videoHeight;
     fc.getContext("2d").drawImage(v, 0, 0);
+    const t0 = performance.now();
     let r;
     try { r = await liveFrameOcr(fc, fc.width, fc.height, live.variant, f => liveState(f) !== "ok"); }
     catch (e) { if (!live) return; await sleep(400); continue; }
     if (!live || !live.running) return;
     live.frames++; live.variant = live.variant === "A" ? "B" : "A";
+    const dt = performance.now() - t0; live.msPerFrame = live.msPerFrame ? live.msPerFrame * 0.6 + dt * 0.4 : dt;
+    if (sh >= live.sharpMax * 0.4) live.blurry = Math.max(0, (live.blurry || 0) - 1);
     if (liveAddVotes(r.out, r.conf)) live.lastNew = live.frames;
     const cnt = Object.keys(r.out).length;
-    if (cnt > live.bestCount) { live.bestCount = cnt; const t = document.createElement("canvas"); const s2 = Math.min(1, 900 / fc.width); t.width = Math.round(fc.width * s2); t.height = Math.round(fc.height * s2); t.getContext("2d").drawImage(fc, 0, 0, t.width, t.height); live.thumb = t.toDataURL("image/jpeg", 0.7); }
-    liveRender(liveHint());
+    if (cnt > live.bestCount) { live.bestCount = cnt; const t = live.thumbCv || (live.thumbCv = document.createElement("canvas")); const s2 = Math.min(1, 900 / fc.width); t.width = Math.round(fc.width * s2); t.height = Math.round(fc.height * s2); t.getContext("2d").drawImage(fc, 0, 0, t.width, t.height); live.thumb = t.toDataURL("image/jpeg", 0.7); }
+    liveRender(liveHint()); liveDiag();
     if (LIVE_FIELDS.every(f => liveState(f.k) === "ok")) { finishLive(); return; }
   }
+}
+function liveSetupZoom() {
+  const box = $("#lvZoom"); box.hidden = true; box.innerHTML = "";
+  const track = live.stream && live.stream.getVideoTracks()[0];
+  const caps = track && track.getCapabilities ? track.getCapabilities() : null;
+  if (!caps || !caps.zoom || !(caps.zoom.max > 1)) return;
+  const steps = [1, 1.5, 2, 3].filter(z => z >= (caps.zoom.min || 1) && z <= caps.zoom.max);
+  if (steps.length < 2) return;
+  box.innerHTML = "Zoom " + steps.map(z => `<button type="button" data-z="${z}" aria-pressed="${z === 1}">${String(z).replace(".", ",")}×</button>`).join("");
+  box.hidden = false;
+  box.onclick = async e => {
+    const b = e.target.closest("button[data-z]"); if (!b) return;
+    try { await track.applyConstraints({ advanced: [{ zoom: +b.dataset.z }] }); box.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b)); } catch {}
+  };
+}
+function liveDiag() {
+  const v = $("#lvVideo"); if (!live || !v.videoWidth) return;
+  const parts = [`Kamera ${v.videoWidth}×${v.videoHeight}`];
+  if (live.msPerFrame) parts.push(`${(live.msPerFrame / 1000).toFixed(1).replace(".", ",")} s pro Bild`);
+  const th = liveFrameOcr.last && liveFrameOcr.last.textH;
+  if (th) parts.push(`Schrift ${Math.round(th)} px`);
+  let warn = "";
+  if (Math.max(v.videoWidth, v.videoHeight) < 1280) warn = "Kamera liefert nur ein kleines Bild";
+  else if (th && th < 5.5) warn = "Schrift zu klein: näher heran oder Zoom";
+  else if (live.blurry >= 3) warn = IS_IOS ? "Oft unscharf: etwas weiter weg (ab ca. 20 cm), das iPhone stellt nah nicht scharf" : "Oft unscharf: ruhiger halten oder etwas weiter weg";
+  $("#lvDiag").innerHTML = esc(parts.join(" · ")) + (warn ? ` · <b>${esc(warn)}</b>` : "");
 }
 function stopLive() {
   if (!live) return;
   live.running = false;
+  try { releaseCanvases(); if (live.fc) { live.fc.width = 0; live.fc.height = 0; } } catch {}
   try { live.stream && live.stream.getTracks().forEach(t => t.stop()); } catch {}
   const v = $("#lvVideo"); v.srcObject = null;
   $("#live").hidden = true; document.body.style.overflow = "";
@@ -849,6 +889,15 @@ async function readViaOcr(img, status, signal, opts = {}){
 }
 
 /* ---------- Live-Scan: ein Kamerabild lesen ---------- */
+// Safari (iPhone/iPad) begrenzt den Speicher für Canvas-Flächen stark: Flächen wiederverwenden statt neu anlegen
+const IS_IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const CV_POOL = {};
+function poolCanvas(name, w, h) {
+  const c = CV_POOL[name] || (CV_POOL[name] = document.createElement("canvas"));
+  if (c.width !== w) c.width = w; if (c.height !== h) c.height = h;
+  return c;
+}
+function releaseCanvases() { for (const c of Object.values(CV_POOL)) { c.width = 0; c.height = 0; } }
 const LIVE_VARIANTS = { A: { k: 0.8 }, B: { k: 0.84, sharpen: 1, despeckle: 2 } };
 async function tessRead(cv, psm, rect, wl = "") {
   await ocrWorker.setParameters({ tessedit_pageseg_mode: psm, preserve_interword_spaces: "1", tessedit_char_whitelist: wl });
@@ -860,24 +909,28 @@ const tessWords = d => (d.words || []).map(x => ({ text: x.text, conf: x.confide
 async function liveFrameOcr(src, sw0, sh0, variant, want, maxRects = 14) {
   // Kleines Abbild: Schräglage und Schriftgrösse schätzen, dann so skalieren, dass die Schrift immer gleich gross ist
   const sw = 1000, sh = Math.round(sh0 * 1000 / sw0);
-  const sc2 = document.createElement("canvas"); sc2.width = sw; sc2.height = sh;
+  const sc2 = poolCanvas("small", sw, sh);
   const sctx = sc2.getContext("2d", { willReadFrequently: true }); sctx.drawImage(src, 0, 0, sw, sh);
   const small = sctx.getImageData(0, 0, sw, sh).data;
   const ang = estimateSkew(small, sw, sh);
   const th = estimateTextHeight(small, sw, sh);
+  liveFrameOcr.last = { textH: th ? th * sw0 / sw : null };
   if (!th) return { out: {}, conf: {}, words: 0, empty: true };
   const thFrame = th * sw0 / sw;
   let sc = Math.max(0.6, Math.min(2.8, 17 / thFrame));
-  if (sw0 * sc > 3400) sc = 3400 / sw0;
+  const maxW = IS_IOS ? 2600 : 3400;
+  if (sw0 * sc > maxW) sc = maxW / sw0;
   const W = Math.round(sw0 * sc), Hh = Math.round(sh0 * sc);
-  const cv0 = document.createElement("canvas"); cv0.width = W; cv0.height = Hh;
+  const cv0 = poolCanvas("work", W, Hh);
   const ctx = cv0.getContext("2d", { willReadFrequently: true }); ctx.imageSmoothingQuality = "high";
   ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, Hh);
   if (Math.abs(ang) >= 0.3) { ctx.translate(W / 2, Hh / 2); ctx.rotate(-ang * Math.PI / 180); ctx.drawImage(src, -W / 2, -Hh / 2, W, Hh); ctx.setTransform(1, 0, 0, 1, 0, 0); }
   else ctx.drawImage(src, 0, 0, W, Hh);
   const pre = preprocessAusweis(ctx.getImageData(0, 0, W, Hh).data, W, Hh, Object.assign({ textH: 24 }, LIVE_VARIANTS[variant]));
-  const cv = document.createElement("canvas"); cv.width = W; cv.height = Hh; cv.getContext("2d").putImageData(new ImageData(pre.data, W, Hh), 0, 0);
-  const words = tessWords(await tessRead(cv, "11"));
+  const cv = poolCanvas("bin", W, Hh); cv.getContext("2d").putImageData(new ImageData(pre.data, W, Hh), 0, 0);
+  // Wörter am Bildrand sind oft abgeschnitten ("Lieferwe" statt "Lieferwagen"): weglassen
+  const m = 4, atEdge = w => w.x0 <= m || w.y0 <= m || w.x1 >= W - m || w.y1 >= Hh - m;
+  const words = tessWords(await tessRead(cv, "11")).filter(w => !atEdge(w));
   const first = extractAusweis(words, { dashes: pre.dashes, ink: pre.ink });
   const res = {};
   // nur Ausschnitte, die ganz im Bild liegen
@@ -900,6 +953,8 @@ async function liveFrameOcr(src, sw0, sh0, variant, want, maxRects = 14) {
     res[r.f] = { text: d.text, words: tessWords(d), ink: pre.ink(rect.left, rect.top, rect.width, rect.height), glyphs: gl };
   }
   const out = refineAusweis(first, res);
+  // Felder, deren Einzellesung bis an den Bildrand reicht, sind womöglich abgeschnitten
+  for (const [f, r] of Object.entries(res)) if ((r.words || []).some(w => w.text.trim() && atEdge(w))) delete out[f];
   return { out, conf: out._conf || {}, words: words.length };
 }
 
@@ -1534,7 +1589,7 @@ function plausibel(f, v) {
     if (/^\*{6}$/.test(v)) return 2;
     const d = v.replace(/^\*+/, "");
     if (/\*/.test(d) || /^0\d/.test(d)) return 0;
-    if (f === "leistungsgewicht") return /^\d?\.\d+$|^\d{1,3}$/.test(d) ? 2 : 1;
+    if (f === "leistungsgewicht") return /^\d?\.\d{1,3}$/.test(d) ? 2 : 0;   // kW/kg ist immer kleiner als 1, z. B. 0.07
     if (d.length < 2) return 0;                       // einstellige Gewichte, Hubraum usw. gibt es nicht
     const n = parseFloat(d);
     const range = { hubraum: [40, 30000], leistung: [1, 2000], leergewicht: [50, 60000], gesamtgewicht: [100, 60000], gewichtZug: [100, 80000], nutzlast: [10, 60000], anhaengelast: [10, 60000], dachlast: [10, 500] }[f];
