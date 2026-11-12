@@ -70,6 +70,16 @@ Testergebnis mit einem echten Ausweis und abgewandelten Fotos (36 Felder pro Bil
 
 Das Ergebnis öffnet sich immer zuerst zum Prüfen. Für ein gutes Ergebnis den Ausweis flach, gleichmässig beleuchtet und gerade von oben fotografieren.
 
+## Live-Scan mit der Kamera
+
+Mit **Live-Scan** liest die App den Ausweis laufend über die Kamera, etwa alle drei Sekunden ein Bild. Ein Feld gilt als bestätigt, sobald es in zwei Bildern gleich gelesen wurde; die Feldliste zeigt grün (bestätigt), gelb (gelesen) und weiss (fehlt). Fehlen Felder, nennt die App sie, und man hält die Kamera näher an diese Stellen. Sind alle Felder bestätigt, endet der Scan von selbst, sonst mit **Übernehmen**.
+
+- Die Schriftgrösse wird pro Bild gemessen, deshalb funktionieren auch Nahaufnahmen einer einzelnen Seite.
+- Verwackelte Bilder werden übersprungen.
+- Felder mit festem Format (Schild, Stammnummer, Datum) zählen nur bei exakt passendem Format; Sachregeln verwerfen Unsinn wie einstellige Gewichte.
+- Test mit einem echten Ausweis und einer simulierten Kamerafahrt: nach rund 95 Sekunden alle 35 Felder bestätigt und richtig.
+- Braucht https (GitHub Pages) und Kamerazugriff. Im claude.ai-Artefakt nicht verfügbar.
+
 In der claude.ai-Variante (als Artefakt) liest stattdessen das eingebaute Claude den Ausweis.
 
 ## Dokumentation
